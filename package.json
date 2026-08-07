@@ -9,6 +9,7 @@
     "apps/web",
     "apps/tray-agent",
     "services/control-plane",
+    "runtimes/local-agent",
     "shared/agent-protocol/ts",
     "shared/skills-sdk",
     "shared/ui-kit",
