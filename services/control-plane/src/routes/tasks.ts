@@ -183,22 +183,24 @@ taskRoutes.get("/v1/tasks/:id/events", async (c) => {
   }
 });
 
-taskRoutes.post("/v1/tasks/:id/:action", async (c) => {
+taskRoutes.post("/v1/tasks/:id/pause", async (c) => {
   const p = c.get("principal")!;
   const id = c.req.param("id");
-  const action = c.req.param("action") as "pause" | "kill" | "redirect";
-  if (!["pause", "kill", "redirect"].includes(action)) return c.json({ error: "invalid_action" }, 400);
+  const db = getDb();
+  await db.update(task).set({ status: "killed" }).where(and(eq(task.id, id), eq(task.org_id, p.org_id)));
+  return c.json({ ok: true, id, action: "pause" });
+});
 
-  if (action === "kill") {
-    const agentTaskId = c.req.query("agent_task_id");
-    if (agentTaskId) {
-      try { await fetch(`${LOCAL_AGENT_URL}/v1/agent/${agentTaskId}/kill`, { method: "POST" }); } catch { /* best effort */ }
-    }
-    const db = getDb();
-    await db.update(task).set({ status: "killed" }).where(eq(task.id, id));
+taskRoutes.post("/v1/tasks/:id/kill", async (c) => {
+  const p = c.get("principal")!;
+  const id = c.req.param("id");
+  const agentTaskId = c.req.query("agent_task_id");
+  if (agentTaskId) {
+    try { await fetch(`${LOCAL_AGENT_URL}/v1/agent/${agentTaskId}/kill`, { method: "POST" }); } catch { /* best effort */ }
   }
-
-  return c.json({ ok: true, id, action });
+  const db = getDb();
+  await db.update(task).set({ status: "killed" }).where(and(eq(task.id, id), eq(task.org_id, p.org_id)));
+  return c.json({ ok: true, id, action: "kill" });
 });
 
 /** GET /v1/tasks/:id/files — list files created by the agent (in the task's cwd). */

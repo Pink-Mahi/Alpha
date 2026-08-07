@@ -88,6 +88,20 @@ export const task = pgTable("task", {
   created_at: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+/** Conversation messages for multi-turn agent chat. */
+export const taskMessage = pgTable("task_message", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  task_id: uuid("task_id").notNull().references(() => task.id, { onDelete: "cascade" }),
+  org_id: uuid("org_id").notNull().references(() => org.id, { onDelete: "cascade" }),
+  role: text("role").notNull(), // "user" | "assistant"
+  content: text("content").notNull(),
+  model: text("model"), // which model generated this (null for user messages)
+  cost_usd: numeric("cost_usd", { precision: 12, scale: 6 }).default("0"),
+  tokens_in: integer("tokens_in").default(0),
+  tokens_out: integer("tokens_out").default(0),
+  created_at: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const agentRun = pgTable("agent_run", {
   id: uuid("id").primaryKey().defaultRandom(),
   org_id: uuid("org_id").notNull().references(() => org.id, { onDelete: "cascade" }),

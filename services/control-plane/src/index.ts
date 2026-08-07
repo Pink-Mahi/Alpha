@@ -12,6 +12,7 @@ import { logger } from "hono/logger";
 import { authRoutes } from "./routes/auth.ts";
 import { byoKeyRoutes } from "./routes/byo-key.ts";
 import { billingRoutes } from "./routes/billing.ts";
+import { conversationRoutes } from "./routes/conversation.ts";
 import { healthRoutes } from "./routes/health.ts";
 import { marketplaceRoutes } from "./routes/marketplace.ts";
 import { modelRoutes } from "./routes/models.ts";
@@ -60,6 +61,7 @@ app.route("/", billingRoutes);
 app.route("/", marketplaceRoutes);
 app.route("/", modelRoutes);
 app.route("/", taskRoutes);
+app.route("/", conversationRoutes);
 app.route("/", usageRoutes);
 
 app.notFound((c) => c.json({ error: "not_found" }, 404));

@@ -12,6 +12,17 @@ interface AgentEvent {
   payload: Record<string, unknown>;
 }
 
+interface Message {
+  id: string;
+  role: string;
+  content: string;
+  model: string | null;
+  cost_usd: string | null;
+  tokens_in: number | null;
+  tokens_out: number | null;
+  created_at: string;
+}
+
 interface TaskData {
   id: string;
   title: string;
@@ -21,6 +32,21 @@ interface TaskData {
   runtime_pref: string;
   model: string | null;
   created_at: string;
+}
+
+interface ModelInfo {
+  id: string;
+  name: string;
+  model: string;
+  context_window: number;
+  pricing: { input_per_1m: number; output_per_1m: number };
+  tags: string[];
+}
+
+interface ProviderGroup {
+  provider: string;
+  has_key: boolean;
+  models: ModelInfo[];
 }
 
 interface AgentState {
@@ -33,12 +59,17 @@ export function TaskDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [task, setTask] = useState<TaskData | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [agentState, setAgentState] = useState<AgentState | null>(null);
   const [agentTaskId, setAgentTaskId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [starting, setStarting] = useState(false);
+  const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
-  const [killing, setKilling] = useState(false);
+  const [inputText, setInputText] = useState("");
+  const [providers, setProviders] = useState<ProviderGroup[]>([]);
+  const [selectedModel, setSelectedModel] = useState("");
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState("");
   const eventLogRef = useRef<HTMLDivElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -51,8 +82,8 @@ export function TaskDetail() {
         const data = await resp.json();
         if (data.task) {
           setTask(data.task);
-        } else {
-          setError("Task data missing from response");
+          setTitleDraft(data.task.title);
+          if (data.task.model) setSelectedModel(data.task.model);
         }
       } else if (resp.status === 401) {
         navigate("/login");
@@ -67,9 +98,36 @@ export function TaskDetail() {
     }
   }, [id, navigate]);
 
+  const fetchMessages = useCallback(async () => {
+    const token = localStorage.getItem("alpha_token");
+    if (!token) return;
+    try {
+      const resp = await fetch(`/v1/tasks/${id}/messages`, { headers: { Authorization: `Bearer ${token}` } });
+      if (resp.ok) {
+        const data = await resp.json();
+        setMessages(data.messages ?? []);
+      }
+    } catch { /* ignore */ }
+  }, [id]);
+
+  const fetchModels = useCallback(async () => {
+    const token = localStorage.getItem("alpha_token");
+    if (!token) return;
+    try {
+      const resp = await fetch(`/v1/models`, { headers: { Authorization: `Bearer ${token}` } });
+      if (resp.ok) {
+        const data = await resp.json();
+        setProviders(data.providers ?? []);
+        if (!selectedModel && data.default_model) setSelectedModel(data.default_model);
+      }
+    } catch { /* ignore */ }
+  }, [selectedModel]);
+
   useEffect(() => {
     fetchTask();
-  }, [fetchTask]);
+    fetchMessages();
+    fetchModels();
+  }, [fetchTask, fetchMessages, fetchModels]);
 
   const pollEvents = useCallback(async () => {
     if (!agentTaskId || !id) return;
@@ -83,10 +141,13 @@ export function TaskDetail() {
         setAgentState(data);
         if (data.status === "complete" || data.status === "failed" || data.status === "killed") {
           if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+          // Refresh messages to get the assistant's response
+          fetchMessages();
+          setSending(false);
         }
       }
     } catch { /* keep polling */ }
-  }, [agentTaskId, id]);
+  }, [agentTaskId, id, fetchMessages]);
 
   useEffect(() => {
     if (agentTaskId) {
@@ -96,51 +157,80 @@ export function TaskDetail() {
     return () => { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; } };
   }, [agentTaskId, pollEvents]);
 
-  // Auto-scroll to bottom on new events
   useEffect(() => {
     if (eventLogRef.current) {
       eventLogRef.current.scrollTop = eventLogRef.current.scrollHeight;
     }
-  }, [agentState?.events.length]);
+  }, [agentState?.events.length, messages.length]);
 
-  async function startAgent() {
+  async function sendMessage() {
+    if (!inputText.trim() || sending) return;
     setError("");
-    setStarting(true);
-    setAgentState(null); // clear old state from previous run
+    setSending(true);
+    setAgentState(null);
     const token = localStorage.getItem("alpha_token");
+    const userMsg = inputText.trim();
+    setInputText("");
+
+    // Optimistically add the user message
+    setMessages((prev) => [...prev, {
+      id: `temp-${Date.now()}`,
+      role: "user",
+      content: userMsg,
+      model: null,
+      cost_usd: null,
+      tokens_in: null,
+      tokens_out: null,
+      created_at: new Date().toISOString(),
+    }]);
+
     try {
-      const resp = await fetch(`/v1/tasks/${id}/start`, {
+      const resp = await fetch(`/v1/tasks/${id}/messages`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ content: userMsg, model: selectedModel || undefined }),
       });
       const data = await resp.json();
       if (!resp.ok) {
-        setError(data.message ?? data.error ?? "Failed to start agent");
-        setStarting(false);
+        setError(data.message ?? data.error ?? "Failed to send message");
+        setSending(false);
         return;
       }
       setAgentTaskId(data.agent_task_id);
-      setStarting(false);
     } catch {
       setError("Network error — is the backend running?");
-    } finally {
-      setStarting(false);
+      setSending(false);
     }
   }
 
-  async function killAgent() {
-    if (!agentTaskId) return;
-    setKilling(true);
+  async function saveTitle() {
+    if (!titleDraft.trim() || !task) return;
     const token = localStorage.getItem("alpha_token");
     try {
-      await fetch(`/v1/tasks/${id}/kill?agent_task_id=${agentTaskId}`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
+      const resp = await fetch(`/v1/tasks/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ title: titleDraft.trim() }),
       });
-      if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
-      pollEvents();
-    } finally {
-      setKilling(false);
+      if (resp.ok) {
+        setTask({ ...task, title: titleDraft.trim() });
+        setEditingTitle(false);
+      }
+    } catch { /* ignore */ }
+  }
+
+  async function changeModel(newModel: string) {
+    setSelectedModel(newModel);
+    if (task) {
+      const token = localStorage.getItem("alpha_token");
+      try {
+        await fetch(`/v1/tasks/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ model: newModel }),
+        });
+        setTask({ ...task, model: newModel });
+      } catch { /* ignore */ }
     }
   }
 
@@ -148,23 +238,59 @@ export function TaskDetail() {
   if (!task) return <div className="muted">Task not found.</div>;
 
   const events = agentState?.events ?? [];
-  const agentStatus = agentState?.status;
-  const isRunning = agentStatus === "running";
-  const isDone = agentStatus === "complete" || agentStatus === "failed" || agentStatus === "killed";
-
-  // Calculate total cost from events
+  const isRunning = agentState?.status === "running";
+  const availableModels = providers.filter((p) => p.has_key).flatMap((p) => p.models);
   const totalCost = events
     .filter((e) => e.type === "cost.tick")
     .reduce((sum, e) => sum + ((e.payload.cost_usd as number) ?? 0), 0);
 
   return (
-    <div>
+    <div style={{ display: "flex", flexDirection: "column", height: "calc(100vh - 2rem)", maxHeight: "calc(100vh - 2rem)" }}>
       {/* Header */}
-      <div style={{ display: "flex", alignItems: "center", gap: "1rem", marginBottom: "1rem" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "0.75rem", flexShrink: 0 }}>
         <button className="btn btn-secondary" style={{ fontSize: "0.8125rem", padding: "0.25rem 0.6rem" }} onClick={() => navigate("/tasks")}>
           ← Tasks
         </button>
-        <h1 style={{ margin: 0, fontSize: "1.25rem" }}>{task.title}</h1>
+        {editingTitle ? (
+          <>
+            <input
+              type="text"
+              value={titleDraft}
+              onChange={(e) => setTitleDraft(e.target.value)}
+              style={{ flex: 1, fontSize: "1.125rem", fontWeight: 600 }}
+              autoFocus
+              onKeyDown={(e) => { if (e.key === "Enter") saveTitle(); if (e.key === "Escape") setEditingTitle(false); }}
+            />
+            <button className="btn" style={{ fontSize: "0.75rem", padding: "0.25rem 0.6rem" }} onClick={saveTitle}>Save</button>
+            <button className="btn btn-secondary" style={{ fontSize: "0.75rem", padding: "0.25rem 0.6rem" }} onClick={() => setEditingTitle(false)}>Cancel</button>
+          </>
+        ) : (
+          <h1
+            style={{ margin: 0, fontSize: "1.125rem", fontWeight: 600, cursor: "pointer", flex: 1 }}
+            onClick={() => setEditingTitle(true)}
+            title="Click to edit"
+          >
+            {task.title}
+          </h1>
+        )}
+        {/* Model picker */}
+        <select
+          value={selectedModel}
+          onChange={(e) => changeModel(e.target.value)}
+          style={{ fontSize: "0.8125rem", maxWidth: "200px" }}
+          title="Switch AI model"
+        >
+          {availableModels.length === 0 && <option value="">No keys</option>}
+          {providers.filter((p) => p.has_key).map((pg) => (
+            <optgroup key={pg.provider} label={pg.provider.charAt(0).toUpperCase() + pg.provider.slice(1)}>
+              {pg.models.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name}
+                </option>
+              ))}
+            </optgroup>
+          ))}
+        </select>
         <span style={{
           padding: "0.25rem 0.6rem",
           borderRadius: "4px",
@@ -174,87 +300,170 @@ export function TaskDetail() {
         }}>{task.status}</span>
       </div>
 
-      {/* Task spec */}
-      <div className="card" style={{ marginBottom: "1rem" }}>
-        <div className="muted" style={{ fontSize: "0.75rem", marginBottom: "0.25rem" }}>Task spec</div>
-        <div style={{ fontSize: "0.875rem", whiteSpace: "pre-wrap" }}>{task.spec}</div>
-        <div style={{ display: "flex", gap: "1rem", marginTop: "0.75rem" }}>
-          <span className="muted" style={{ fontSize: "0.75rem" }}>Budget: ${task.budget_usd}</span>
-          <span className="muted" style={{ fontSize: "0.75rem" }}>Runtime: {task.runtime_pref}</span>
-          <span className="muted" style={{ fontSize: "0.75rem" }}>Model: {task.model ? (task.model.split(":")[1] ?? task.model) : "auto"}</span>
-        </div>
-      </div>
-
       {error && (
-        <div className="card" style={{ borderColor: "#f85149", color: "#f85149", fontSize: "0.875rem", marginBottom: "1rem" }}>
+        <div className="card" style={{ borderColor: "#f85149", color: "#f85149", fontSize: "0.875rem", marginBottom: "0.75rem", flexShrink: 0 }}>
           {error}
         </div>
       )}
 
-      {/* Agent controls */}
-      <div style={{ display: "flex", gap: "0.75rem", marginBottom: "1rem", alignItems: "center" }}>
-        {!isRunning && (
-          <button className="btn" onClick={startAgent} disabled={starting}>
-            {starting ? "Starting agent..." : (isDone ? "▶ Restart Agent" : "▶ Start Agent")}
-          </button>
-        )}
-        {isRunning && (
-          <button className="btn btn-secondary" onClick={killAgent} disabled={killing}>
-            {killing ? "Stopping..." : "■ Stop Agent"}
-          </button>
-        )}
-        {agentTaskId && agentState && (
-          <span className="muted" style={{ fontSize: "0.8125rem" }}>
-            {isRunning && <span style={{ color: "#1f6feb" }}>● Agent working...</span>}
-            {agentStatus === "complete" && <span style={{ color: "#238636" }}>✓ Complete</span>}
-            {agentStatus === "failed" && <span style={{ color: "#f85149" }}>✗ Failed</span>}
-            {agentStatus === "killed" && <span style={{ color: "#f85149" }}>■ Stopped</span>}
-          </span>
-        )}
-        {task.status === "running" && !agentTaskId && (
-          <span className="muted" style={{ fontSize: "0.8125rem", color: "#d29922" }}>
-            ⚠ Task was previously started but no agent session is active. Click Start to re-run.
-          </span>
-        )}
-      </div>
+      {/* Chat area */}
+      <div ref={eventLogRef} style={{ flex: 1, overflowY: "auto", marginBottom: "0.75rem" }}>
+        {/* Conversation messages */}
+        {messages.map((m) => (
+          <MessageBubble key={m.id} message={m} />
+        ))}
 
-      {/* Agent event stream — chat-like UI */}
-      {agentTaskId && (
-        <div className="card" style={{ padding: 0, overflow: "hidden" }}>
-          <div style={{ padding: "0.75rem 1rem", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <span style={{ fontWeight: 600, fontSize: "0.875rem" }}>Agent Activity</span>
-            {totalCost > 0 && (
-              <span className="muted" style={{ fontSize: "0.75rem" }}>Cost: ${totalCost.toFixed(4)}</span>
-            )}
-          </div>
-          <div ref={eventLogRef} style={{ maxHeight: "60vh", overflowY: "auto", padding: "0.75rem" }}>
-            {events.length === 0 && (
-              <div className="muted" style={{ fontSize: "0.875rem", padding: "1rem" }}>Waiting for agent to start...</div>
-            )}
+        {/* Live agent events (while running) */}
+        {agentTaskId && events.length > 0 && (
+          <div style={{ marginBottom: "1rem" }}>
+            <div style={{ fontSize: "0.75rem", color: "#1f6feb", marginBottom: "0.5rem" }}>
+              ● Agent working{totalCost > 0 ? ` — $${totalCost.toFixed(4)}` : ""}
+            </div>
             {events.map((e, i) => <EventRow key={i} event={e} />)}
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Result summary */}
-      {agentState?.result && isDone && (
-        <div className="card" style={{ marginTop: "1rem", borderColor: agentState.result.success ? "#238636" : "#f85149" }}>
-          <h2 style={{ fontSize: "1rem" }}>Result</h2>
-          <div style={{ fontSize: "0.875rem", whiteSpace: "pre-wrap", marginBottom: "0.75rem" }}>
-            {agentState.result.summary}
-          </div>
-          <div style={{ display: "flex", gap: "1rem" }}>
-            <span className="muted" style={{ fontSize: "0.75rem" }}>Cost: ${agentState.result.costUsd.toFixed(4)}</span>
-            <span className="muted" style={{ fontSize: "0.75rem" }}>Iterations: {agentState.result.iterations}</span>
-            <span className="muted" style={{ fontSize: "0.75rem" }}>Success: {agentState.result.success ? "Yes" : "No"}</span>
-          </div>
-        </div>
-      )}
+        {/* File browser after completion */}
+        {agentState?.status === "complete" && <FileBrowser taskId={id!} />}
+      </div>
 
-      {/* File browser + preview pane */}
-      {isDone && <FileBrowser taskId={id!} />}
+      {/* Input box */}
+      <div style={{ flexShrink: 0, display: "flex", gap: "0.5rem", alignItems: "flex-end" }}>
+        <textarea
+          value={inputText}
+          onChange={(e) => setInputText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              sendMessage();
+            }
+          }}
+          placeholder={isRunning ? "Agent is working..." : "Send a message to the agent... (Enter to send, Shift+Enter for newline)"}
+          disabled={sending}
+          rows={2}
+          style={{ flex: 1, resize: "none", fontSize: "0.875rem" }}
+        />
+        <button
+          className="btn"
+          onClick={sendMessage}
+          disabled={sending || !inputText.trim()}
+          style={{ height: "fit-content" }}
+        >
+          {sending ? "Working..." : "Send ↵"}
+        </button>
+      </div>
     </div>
   );
+}
+
+/** Render a conversation message as a chat bubble. */
+function MessageBubble({ message }: { message: Message }) {
+  const isUser = message.role === "user";
+  const time = new Date(message.created_at).toLocaleTimeString();
+  const modelName = message.model ? (message.model.split(":")[1] ?? message.model) : null;
+
+  return (
+    <div style={{
+      display: "flex",
+      justifyContent: isUser ? "flex-end" : "flex-start",
+      marginBottom: "1rem",
+    }}>
+      <div style={{
+        maxWidth: "80%",
+        padding: "0.75rem 1rem",
+        borderRadius: "var(--radius)",
+        background: isUser ? "#1f6feb" : "var(--bg)",
+        color: isUser ? "white" : "inherit",
+        border: isUser ? "none" : "1px solid var(--border)",
+      }}>
+        <div style={{ fontSize: "0.75rem", opacity: 0.7, marginBottom: "0.25rem" }}>
+          {isUser ? "You" : `Agent${modelName ? ` · ${modelName}` : ""}`} · {time}
+          {message.cost_usd && parseFloat(message.cost_usd) > 0 && ` · $${parseFloat(message.cost_usd).toFixed(4)}`}
+        </div>
+        <div style={{ fontSize: "0.875rem", whiteSpace: "pre-wrap", lineHeight: 1.5 }}>
+          {message.content}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Render a single agent event as a compact row. */
+function EventRow({ event }: { event: AgentEvent }) {
+  const time = new Date(event.ts).toLocaleTimeString();
+
+  switch (event.type) {
+    case "task.start":
+      return (
+        <div style={{ fontSize: "0.75rem", color: "var(--muted)", marginBottom: "0.25rem", paddingLeft: "0.5rem" }}>
+          ▶ Started — {time} | Model: {(event.payload.model_policy as { preferred: string[] })?.preferred?.[0] ?? "default"}
+        </div>
+      );
+
+    case "cost.tick":
+      return (
+        <div style={{ fontSize: "0.75rem", color: "var(--muted)", marginBottom: "0.25rem", paddingLeft: "0.5rem" }}>
+          💰 {(event.payload.model as string)?.split(":")[1] ?? "model"} — {(event.payload.tokens_in as number) + (event.payload.tokens_out as number)} tokens, ${(event.payload.cost_usd as number)?.toFixed(4)}
+        </div>
+      );
+
+    case "tool.call": {
+      const tool = event.payload.tool as string;
+      const args = event.payload.args as Record<string, unknown>;
+      const argPreview = Object.entries(args).slice(0, 2).map(([k, v]) => `${k}: ${truncate(v, 50)}`).join(", ");
+      return (
+        <div style={{ fontSize: "0.8125rem", color: "#d29922", marginBottom: "0.25rem", paddingLeft: "0.5rem" }}>
+          🔧 {tool}({argPreview}{Object.keys(args).length > 2 ? "..." : ""})
+        </div>
+      );
+    }
+
+    case "tool.result": {
+      const output = event.payload.output;
+      const error = event.payload.error as string | null | undefined;
+      const isError = error && error !== "null" && error !== undefined;
+      return (
+        <div style={{ marginBottom: "0.5rem", paddingLeft: "1rem", borderLeft: `2px solid ${isError ? "#f85149" : "var(--border)"}` }}>
+          <pre style={{
+            fontSize: "0.75rem",
+            margin: 0,
+            whiteSpace: "pre-wrap",
+            color: isError ? "#f85149" : "var(--muted)",
+            fontFamily: "monospace",
+            maxHeight: "150px",
+            overflow: "hidden",
+          }}>
+            {isError ? error : truncate(output ?? "(no output)", 300)}
+          </pre>
+        </div>
+      );
+    }
+
+    case "state.event":
+      return null;
+
+    case "task.complete":
+      return (
+        <div style={{ marginTop: "0.5rem", padding: "0.5rem", background: "rgba(35, 134, 54, 0.1)", borderRadius: "var(--radius)", borderLeft: "3px solid #238636" }}>
+          <div style={{ fontSize: "0.8125rem", fontWeight: 600, color: "#238636" }}>✓ Complete — {time}</div>
+        </div>
+      );
+
+    case "task.failed":
+      return (
+        <div style={{ marginTop: "0.5rem", padding: "0.5rem", background: "rgba(248, 81, 73, 0.1)", borderRadius: "var(--radius)", borderLeft: "3px solid #f85149" }}>
+          <div style={{ fontSize: "0.8125rem", fontWeight: 600, color: "#f85149" }}>✗ Failed — {time}</div>
+          <div style={{ fontSize: "0.8125rem", marginTop: "0.25rem" }}>{event.payload.reason as string}</div>
+        </div>
+      );
+
+    default:
+      return (
+        <div style={{ fontSize: "0.75rem", color: "var(--muted)", marginBottom: "0.25rem", paddingLeft: "0.5rem" }}>
+          {event.type} — {time}
+        </div>
+      );
+  }
 }
 
 /** File browser with code view, run button, and live HTML preview. */
@@ -268,9 +477,7 @@ function FileBrowser({ taskId }: { taskId: string }) {
   const [showPreview, setShowPreview] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    fetchFiles();
-  }, []);
+  useEffect(() => { fetchFiles(); }, []);
 
   async function fetchFiles() {
     const token = localStorage.getItem("alpha_token");
@@ -279,11 +486,8 @@ function FileBrowser({ taskId }: { taskId: string }) {
       if (resp.ok) {
         const data = await resp.json();
         setFiles(data.files ?? []);
-        // Auto-select the first interesting file
         const first = (data.files ?? []).find((f: { ext: string }) => ["html", "py", "js"].includes(f.ext));
-        if (first) {
-          loadFile(first.name);
-        }
+        if (first) loadFile(first.name);
       }
     } catch { /* ignore */ }
     finally { setLoading(false); }
@@ -300,7 +504,6 @@ function FileBrowser({ taskId }: { taskId: string }) {
         const data = await resp.json();
         setFileContent(data.content ?? "");
         setFileExt(data.ext ?? "");
-        // Auto-show preview for HTML files
         if (data.ext === "html") setShowPreview(true);
       }
     } catch { /* ignore */ }
@@ -331,183 +534,47 @@ function FileBrowser({ taskId }: { taskId: string }) {
     finally { setRunning(false); }
   }
 
-  if (loading) return null;
-  if (files.length === 0) return null;
-
+  if (loading || files.length === 0) return null;
   const canRun = ["py", "js", "ts"].includes(fileExt);
   const canPreview = fileExt === "html";
 
   return (
     <div className="card" style={{ marginTop: "1rem", padding: 0, overflow: "hidden" }}>
-      <div style={{ padding: "0.75rem 1rem", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <span style={{ fontWeight: 600, fontSize: "0.875rem" }}>Files Created by Agent</span>
+      <div style={{ padding: "0.5rem 0.75rem", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <span style={{ fontWeight: 600, fontSize: "0.8125rem" }}>📁 Files</span>
         <div style={{ display: "flex", gap: "0.5rem" }}>
-          {canRun && (
-            <button className="btn" style={{ fontSize: "0.75rem", padding: "0.25rem 0.6rem" }} onClick={runFile} disabled={running}>
-              {running ? "Running..." : "▶ Run"}
-            </button>
-          )}
-          {canPreview && (
-            <button className="btn" style={{ fontSize: "0.75rem", padding: "0.25rem 0.6rem" }} onClick={() => setShowPreview(!showPreview)}>
-              {showPreview ? "📄 Code" : "👁 Preview"}
-            </button>
-          )}
+          {canRun && <button className="btn" style={{ fontSize: "0.7rem", padding: "0.2rem 0.5rem" }} onClick={runFile} disabled={running}>{running ? "Running..." : "▶ Run"}</button>}
+          {canPreview && <button className="btn" style={{ fontSize: "0.7rem", padding: "0.2rem 0.5rem" }} onClick={() => setShowPreview(!showPreview)}>{showPreview ? "📄 Code" : "👁 Preview"}</button>}
         </div>
       </div>
-
-      <div style={{ display: "flex", minHeight: "300px" }}>
-        {/* File list sidebar */}
-        <div style={{ width: "200px", borderRight: "1px solid var(--border)", padding: "0.5rem", overflowY: "auto" }}>
+      <div style={{ display: "flex", minHeight: "250px" }}>
+        <div style={{ width: "180px", borderRight: "1px solid var(--border)", padding: "0.4rem", overflowY: "auto" }}>
           {files.map((f) => (
-            <div
-              key={f.name}
-              onClick={() => loadFile(f.name)}
-              style={{
-                padding: "0.4rem 0.6rem",
-                cursor: "pointer",
-                borderRadius: "var(--radius)",
-                fontSize: "0.8125rem",
-                background: selectedFile === f.name ? "var(--border)" : "transparent",
-                fontFamily: "monospace",
-                display: "flex",
-                alignItems: "center",
-                gap: "0.4rem",
-              }}
-              onMouseEnter={(e) => { if (selectedFile !== f.name) e.currentTarget.style.background = "var(--bg)"; }}
-              onMouseLeave={(e) => { if (selectedFile !== f.name) e.currentTarget.style.background = "transparent"; }}
-            >
-              <span style={{ fontSize: "0.7rem", opacity: 0.6 }}>{f.ext}</span>
-              {f.name}
-            </div>
+            <div key={f.name} onClick={() => loadFile(f.name)} style={{
+              padding: "0.3rem 0.5rem", cursor: "pointer", borderRadius: "var(--radius)",
+              fontSize: "0.75rem", fontFamily: "monospace",
+              background: selectedFile === f.name ? "var(--border)" : "transparent",
+            }}>{f.name}</div>
           ))}
         </div>
-
-        {/* Content area */}
         <div style={{ flex: 1, overflow: "auto" }}>
           {showPreview && canPreview ? (
-            <iframe
-              srcDoc={fileContent}
-              title="Preview"
-              style={{ width: "100%", height: "400px", border: "none", background: "white" }}
-              sandbox="allow-scripts allow-same-origin"
-            />
+            <iframe srcDoc={fileContent} title="Preview" style={{ width: "100%", height: "350px", border: "none", background: "white" }} sandbox="allow-scripts allow-same-origin" />
           ) : runOutput ? (
-            <div style={{ padding: "0.75rem", fontFamily: "monospace", fontSize: "0.8125rem" }}>
-              {runOutput.stdout && (
-                <div>
-                  <div className="muted" style={{ fontSize: "0.7rem", marginBottom: "0.25rem" }}>stdout:</div>
-                  <pre style={{ whiteSpace: "pre-wrap", margin: 0, marginBottom: "0.75rem" }}>{runOutput.stdout}</pre>
-                </div>
-              )}
-              {runOutput.stderr && (
-                <div>
-                  <div style={{ fontSize: "0.7rem", marginBottom: "0.25rem", color: "#f85149" }}>stderr:</div>
-                  <pre style={{ whiteSpace: "pre-wrap", margin: 0, color: "#f85149" }}>{runOutput.stderr}</pre>
-                </div>
-              )}
-              <div className="muted" style={{ fontSize: "0.7rem", marginTop: "0.5rem" }}>Exit code: {runOutput.exitCode}</div>
+            <div style={{ padding: "0.5rem", fontFamily: "monospace", fontSize: "0.75rem" }}>
+              {runOutput.stdout && <pre style={{ whiteSpace: "pre-wrap", margin: 0, marginBottom: "0.5rem" }}>{runOutput.stdout}</pre>}
+              {runOutput.stderr && <pre style={{ whiteSpace: "pre-wrap", margin: 0, color: "#f85149" }}>{runOutput.stderr}</pre>}
+              <div className="muted" style={{ fontSize: "0.7rem", marginTop: "0.5rem" }}>Exit: {runOutput.exitCode}</div>
             </div>
           ) : selectedFile ? (
-            <pre style={{ padding: "0.75rem", margin: 0, fontSize: "0.8125rem", whiteSpace: "pre-wrap", fontFamily: "monospace", overflowX: "auto" }}>
-              {fileContent || "(empty file)"}
-            </pre>
+            <pre style={{ padding: "0.5rem", margin: 0, fontSize: "0.75rem", whiteSpace: "pre-wrap", fontFamily: "monospace", overflowX: "auto" }}>{fileContent || "(empty)"}</pre>
           ) : (
-            <div className="muted" style={{ padding: "2rem", textAlign: "center", fontSize: "0.875rem" }}>
-              Select a file to view its contents
-            </div>
+            <div className="muted" style={{ padding: "1rem", fontSize: "0.8125rem" }}>Select a file</div>
           )}
         </div>
       </div>
     </div>
   );
-}
-
-/** Render a single agent event as a chat-like row. */
-function EventRow({ event }: { event: AgentEvent }) {
-  const time = new Date(event.ts).toLocaleTimeString();
-
-  switch (event.type) {
-    case "task.start":
-      return (
-        <div style={{ marginBottom: "0.75rem" }}>
-          <div style={{ fontSize: "0.75rem", color: "#1f6feb", marginBottom: "0.25rem" }}>▶ Task started — {time}</div>
-          <div style={{ fontSize: "0.875rem", paddingLeft: "1rem", borderLeft: "2px solid var(--border)" }}>
-            Budget: ${(event.payload.budget_usd as number)?.toFixed(2)} | Model: {(event.payload.model_policy as { preferred: string[] })?.preferred?.[0] ?? "default"}
-          </div>
-        </div>
-      );
-
-    case "cost.tick":
-      return (
-        <div style={{ fontSize: "0.75rem", color: "var(--muted)", marginBottom: "0.25rem", paddingLeft: "1rem" }}>
-          💰 {(event.payload.model as string)?.split(":")[1] ?? "model"} — {(event.payload.tokens_in as number) + (event.payload.tokens_out as number)} tokens, ${(event.payload.cost_usd as number)?.toFixed(4)}
-        </div>
-      );
-
-    case "tool.call": {
-      const tool = event.payload.tool as string;
-      const args = event.payload.args as Record<string, unknown>;
-      const argPreview = Object.entries(args).slice(0, 3).map(([k, v]) => `${k}: ${truncate(String(v), 60)}`).join(", ");
-      return (
-        <div style={{ marginBottom: "0.5rem" }}>
-          <div style={{ fontSize: "0.8125rem", fontWeight: 500, color: "#d29922" }}>
-            🔧 {tool}({argPreview}{Object.keys(args).length > 3 ? "..." : ""})
-          </div>
-        </div>
-      );
-    }
-
-    case "tool.result": {
-      const output = event.payload.output;
-      const error = event.payload.error as string | null | undefined;
-      const isError = error && error !== "null" && error !== undefined;
-      return (
-        <div style={{ marginBottom: "0.75rem", paddingLeft: "1rem", borderLeft: `2px solid ${isError ? "#f85149" : "var(--border)"}` }}>
-          <pre style={{
-            fontSize: "0.75rem",
-            margin: 0,
-            whiteSpace: "pre-wrap",
-            color: isError ? "#f85149" : "var(--muted)",
-            fontFamily: "monospace",
-            maxHeight: "200px",
-            overflow: "hidden",
-          }}>
-            {isError ? error : truncate(output ?? "(no output)", 500)}
-          </pre>
-        </div>
-      );
-    }
-
-    case "state.event":
-      return null; // redundant with tool.result
-
-    case "task.complete":
-      return (
-        <div style={{ marginTop: "0.75rem", padding: "0.75rem", background: "rgba(35, 134, 54, 0.1)", borderRadius: "var(--radius)", borderLeft: "3px solid #238636" }}>
-          <div style={{ fontSize: "0.875rem", fontWeight: 600, color: "#238636" }}>✓ Task Complete — {time}</div>
-          <div style={{ fontSize: "0.8125rem", marginTop: "0.25rem", whiteSpace: "pre-wrap" }}>
-            {event.payload.summary as string}
-          </div>
-        </div>
-      );
-
-    case "task.failed":
-      return (
-        <div style={{ marginTop: "0.75rem", padding: "0.75rem", background: "rgba(248, 81, 73, 0.1)", borderRadius: "var(--radius)", borderLeft: "3px solid #f85149" }}>
-          <div style={{ fontSize: "0.875rem", fontWeight: 600, color: "#f85149" }}>✗ Task Failed — {time}</div>
-          <div style={{ fontSize: "0.8125rem", marginTop: "0.25rem" }}>
-            {event.payload.reason as string}
-          </div>
-        </div>
-      );
-
-    default:
-      return (
-        <div style={{ fontSize: "0.75rem", color: "var(--muted)", marginBottom: "0.25rem" }}>
-          {event.type} — {time}
-        </div>
-      );
-  }
 }
 
 function truncate(s: unknown, max: number): string {

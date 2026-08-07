@@ -33,6 +33,8 @@ export interface AgentLoopConfig {
   requestApproval: ToolContext["requestApproval"];
   /** BYO-key for the model provider, if using managed routing. */
   apiKey?: string;
+  /** Pre-loaded conversation history (for multi-turn chat). */
+  messages?: Array<{ role: string; content: string }>;
 }
 
 export interface AgentLoopResult {
@@ -80,10 +82,14 @@ export class AgentLoop {
       log: (level, msg) => console[level](`[agent:${config.runId.slice(0, 8)}] ${msg}`),
     };
 
-    // Initialize conversation with the task spec.
-    this.messages = [
-      { role: "user", content: config.spec } as Record<string, unknown>,
-    ];
+    // Initialize conversation — use provided history or start fresh with the spec.
+    if (config.messages && config.messages.length > 0) {
+      this.messages = config.messages.map((m) => ({ role: m.role, content: m.content }) as Record<string, unknown>);
+    } else {
+      this.messages = [
+        { role: "user", content: config.spec } as Record<string, unknown>,
+      ];
+    }
 
     const toolDescriptors = this.bus.descriptors(config.toolAllowList);
 

@@ -55,6 +55,10 @@ const startSchema = z.object({
   max_iterations: z.number().default(20),
   api_key: z.string().optional(),
   tool_allowlist: z.array(z.string()).optional(),
+  messages: z.array(z.object({
+    role: z.string(),
+    content: z.string(),
+  })).optional(),
 });
 
 app.post("/v1/agent/start", async (c) => {
@@ -78,6 +82,7 @@ app.post("/v1/agent/start", async (c) => {
     maxIterations: body.max_iterations,
     model: body.model,
     toolAllowList: body.tool_allowlist,
+    messages: body.messages,
     permissions: new Set([
       "fs.read", "fs.write", "fs.list",
       "shell.exec", "git.read", "git.write",
