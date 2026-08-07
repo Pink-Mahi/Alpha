@@ -1,14 +1,17 @@
-/** Marketplace routes — browse and install curated skills. */
+/** Marketplace routes — browse, install, submit, and review skills. */
 import { Hono } from "hono";
 import { z } from "zod";
 
 import { authMiddleware } from "../auth/middleware.ts";
 import type { AuthPrincipal } from "../auth/index.ts";
 import { CURATED_LISTINGS, type ReviewStatus } from "../marketplace/catalog.ts";
+import { SubmissionManager } from "../marketplace/submission.ts";
 
 export const marketplaceRoutes = new Hono<{ Variables: { principal: AuthPrincipal } }>();
 
 marketplaceRoutes.use("*", authMiddleware());
+
+const submissionManager = new SubmissionManager();
 
 /** Browse the marketplace catalog with optional category/review filters. */
 marketplaceRoutes.get("/v1/marketplace", (c) => {
@@ -105,5 +108,135 @@ marketplaceRoutes.post("/v1/marketplace/install", async (c) => {
     manifest: listing.manifest,
     config: parsed.data!.config ?? listing.manifest.defaultConfig ?? {},
     install_instructions: "POST this manifest to the tray agent's /v1/skills/install endpoint",
+  });
+});
+
+// --- Open submission (M3) ---------------------------------------------------
+
+const submitSchema = z.object({
+  manifest: z.object({
+    name: z.string().min(1),
+    version: z.string().min(1),
+    description: z.string().min(1),
+    author: z.string().min(1),
+    permissions: z.array(z.string()),
+    tools: z.array(z.string()).optional(),
+    heartbeats: z.array(z.object({
+      id: z.string(), name: z.string(), schedule: z.string(),
+      scheduleType: z.enum(["cron", "interval"]), action: z.string(),
+    })).optional(),
+    configSchema: z.record(z.unknown()).optional(),
+    defaultConfig: z.record(z.unknown()).optional(),
+  }),
+  category: z.string().min(1),
+  tags: z.array(z.string()),
+  readme: z.string().min(1),
+  price_monthly: z.number().min(0).default(0),
+});
+
+/** Submit a skill to the marketplace. */
+marketplaceRoutes.post("/v1/marketplace/submit", async (c) => {
+  const p = c.get("principal")!;
+  const parsed = submitSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) return c.json({ error: "invalid_body", issues: parsed.error.issues }, 400);
+  const data = parsed.data;
+  const sub = submissionManager.submit({
+    orgId: p.org_id,
+    submitterId: p.user_id,
+    manifest: data.manifest,
+    category: data.category,
+    tags: data.tags,
+    readme: data.readme,
+    priceMonthly: data.price_monthly,
+  });
+  return c.json({ submission_id: sub.id, status: sub.status }, 201);
+});
+
+/** List submissions (own org's submissions, or all if admin). */
+marketplaceRoutes.get("/v1/marketplace/submissions", (c) => {
+  const p = c.get("principal")!;
+  const status = c.req.query("status") as import("../marketplace/submission.ts").SubmissionStatus | undefined;
+  // Org members see their own submissions; admins see all.
+  const subs = p.role === "owner" || p.role === "admin"
+    ? submissionManager.list(status)
+    : submissionManager.list(status).filter((s) => s.orgId === p.org_id);
+  return c.json({ submissions: subs });
+});
+
+/** Get a specific submission. */
+marketplaceRoutes.get("/v1/marketplace/submissions/:id", (c) => {
+  const p = c.get("principal")!;
+  const sub = submissionManager.get(c.req.param("id"));
+  if (!sub) return c.json({ error: "not_found" }, 404);
+  if (sub.orgId !== p.org_id && p.role !== "owner" && p.role !== "admin") {
+    return c.json({ error: "forbidden" }, 403);
+  }
+  return c.json({ submission: sub });
+});
+
+/** Start reviewing a submission (admin only). */
+marketplaceRoutes.post("/v1/marketplace/submissions/:id/review", async (c) => {
+  const p = c.get("principal")!;
+  if (p.role !== "owner" && p.role !== "admin") {
+    return c.json({ error: "forbidden", reason: "admin only" }, 403);
+  }
+  const sub = submissionManager.startReview(c.req.param("id"), p.user_id);
+  if (!sub) return c.json({ error: "not_found_or_wrong_status" }, 404);
+  return c.json({ submission_id: sub.id, status: sub.status });
+});
+
+const reviewSchema = z.object({ notes: z.string().default("") });
+
+/** Approve and publish a submission (admin only). */
+marketplaceRoutes.post("/v1/marketplace/submissions/:id/approve", async (c) => {
+  const p = c.get("principal")!;
+  if (p.role !== "owner" && p.role !== "admin") {
+    return c.json({ error: "forbidden", reason: "admin only" }, 403);
+  }
+  const parsed = reviewSchema.safeParse(await c.req.json().catch(() => ({})));
+  const sub = submissionManager.approve(c.req.param("id"), p.user_id, parsed.success ? parsed.data.notes : "");
+  if (!sub) return c.json({ error: "not_found_or_wrong_status" }, 404);
+  return c.json({ submission_id: sub.id, status: sub.status, published_at: sub.publishedAt?.toISOString() });
+});
+
+/** Reject a submission (admin only). */
+marketplaceRoutes.post("/v1/marketplace/submissions/:id/reject", async (c) => {
+  const p = c.get("principal")!;
+  if (p.role !== "owner" && p.role !== "admin") {
+    return c.json({ error: "forbidden", reason: "admin only" }, 403);
+  }
+  const parsed = reviewSchema.safeParse(await c.req.json().catch(() => ({})));
+  const sub = submissionManager.reject(c.req.param("id"), p.user_id, parsed.success ? parsed.data.notes : "");
+  if (!sub) return c.json({ error: "not_found_or_wrong_status" }, 404);
+  return c.json({ submission_id: sub.id, status: sub.status, review_notes: sub.reviewNotes });
+});
+
+/** List published community skills (open marketplace). */
+marketplaceRoutes.get("/v1/marketplace/community", (c) => {
+  const published = submissionManager.listPublished().map((s) => ({
+    id: s.id,
+    name: s.manifest.name,
+    version: s.manifest.version,
+    description: s.manifest.description,
+    author: s.manifest.author,
+    category: s.category,
+    tags: s.tags,
+    price_monthly: s.priceMonthly,
+    install_count: s.installCount,
+    rating: 0, // TODO: ratings in M4
+    permissions: s.manifest.permissions,
+  }));
+  return c.json({ listings: published, total: published.length });
+});
+
+/** Get author revenue stats. */
+marketplaceRoutes.get("/v1/marketplace/revenue", (c) => {
+  const p = c.get("principal")!;
+  const stats = submissionManager.getAuthorStats(p.user_id);
+  return c.json({
+    ...stats,
+    revenue_share_author: 0.7,
+    revenue_share_cascade: 0.3,
+    note: "Revenue share is 70% author, 30% Cascade. Payouts via Stripe Connect (M4).",
   });
 });
