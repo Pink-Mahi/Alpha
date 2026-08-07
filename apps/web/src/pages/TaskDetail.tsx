@@ -290,9 +290,9 @@ function EventRow({ event }: { event: AgentEvent }) {
     }
 
     case "tool.result": {
-      const output = event.payload.output as string | undefined;
-      const error = event.payload.error as string | null;
-      const isError = error && error !== "null";
+      const output = event.payload.output;
+      const error = event.payload.error as string | null | undefined;
+      const isError = error && error !== "null" && error !== undefined;
       return (
         <div style={{ marginBottom: "0.75rem", paddingLeft: "1rem", borderLeft: `2px solid ${isError ? "#f85149" : "var(--border)"}` }}>
           <pre style={{
@@ -342,7 +342,8 @@ function EventRow({ event }: { event: AgentEvent }) {
   }
 }
 
-function truncate(s: string, max: number): string {
-  if (s.length <= max) return s;
-  return s.slice(0, max) + "...";
+function truncate(s: unknown, max: number): string {
+  const str = typeof s === "string" ? s : s == null ? "" : JSON.stringify(s);
+  if (str.length <= max) return str;
+  return str.slice(0, max) + "...";
 }
