@@ -28,7 +28,7 @@ const services = [
   {
     name: "model-router",
     port: 8081,
-    cmd: ["python", "-m", "uvicorn", "ALPHA_model_router.app:app", "--port", "8081"],
+    cmd: ["uv", "run", "uvicorn", "alpha_model_router.app:app", "--port", "8081"],
     cwd: "services/model-router",
     env: {},
   },

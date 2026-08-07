@@ -11,7 +11,7 @@ const url = process.env.DATABASE_URL ?? "postgres://postgres:postgres@localhost:
 const sql = postgres(url, { max: 1, prepare: false });
 const db = drizzle(sql);
 
-const migrationsFolder = new URL("./migrations", import.meta.url).pathname;
+const migrationsFolder = `${import.meta.dir}/migrations`;
 
 await migrate(db, { migrationsFolder });
 console.log("[db] migrations applied");

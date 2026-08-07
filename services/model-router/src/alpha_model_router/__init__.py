@@ -1,4 +1,4 @@
-"""ALPHA_model_router package root."""
+"""alpha_model_router package root."""
 from .providers.base import ModelId, RouterRequest, RouterResponse
 from .router import ModelRouter
 

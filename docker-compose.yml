@@ -1,34 +1,34 @@
-# Docker Compose — local dev infrastructure for ALPHA.
+# Docker Compose — local dev infrastructure for Alpha.
 # Starts Postgres (with pgvector) + Redis for the control plane.
 #
 # Usage: docker compose up -d
-# Then: DATABASE_URL=postgres://ALPHA:ALPHA@localhost:5432/ALPHA
+# Then: DATABASE_URL=postgres://alpha:alpha@localhost:5432/alpha
 
 services:
   postgres:
     image: pgvector/pgvector:pg16
-    container_name: ALPHA-postgres
+    container_name: alpha-postgres
     environment:
-      POSTGRES_USER: ALPHA
-      POSTGRES_PASSWORD: ALPHA
-      POSTGRES_DB: ALPHA
+      POSTGRES_USER: alpha
+      POSTGRES_PASSWORD: alpha
+      POSTGRES_DB: alpha
     ports:
       - "5432:5432"
     volumes:
-      - ALPHA-pg-data:/var/lib/postgresql/data
+      - alpha-pg-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ALPHA"]
+      test: ["CMD-SHELL", "pg_isready -U alpha"]
       interval: 5s
       timeout: 5s
       retries: 5
 
   redis:
     image: redis:7-alpine
-    container_name: ALPHA-redis
+    container_name: alpha-redis
     ports:
       - "6379:6379"
     volumes:
-      - ALPHA-redis-data:/data
+      - alpha-redis-data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -36,5 +36,5 @@ services:
       retries: 5
 
 volumes:
-  ALPHA-pg-data:
-  ALPHA-redis-data:
+  alpha-pg-data:
+  alpha-redis-data:

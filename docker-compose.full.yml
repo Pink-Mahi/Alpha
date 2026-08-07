@@ -11,7 +11,7 @@ services:
       POSTGRES_PASSWORD: ALPHA
       POSTGRES_DB: ALPHA
     ports: ["5432:5432"]
-    volumes: [ALPHA-pg-data:/var/lib/postgresql/data]
+    volumes: [alpha-pg-data:/var/lib/postgresql/data]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ALPHA"]
       interval: 5s
@@ -21,7 +21,7 @@ services:
   redis:
     image: redis:7-alpine
     ports: ["6379:6379"]
-    volumes: [ALPHA-redis-data:/data]
+    volumes: [alpha-redis-data:/data]
 
   control-plane:
     build:
@@ -107,5 +107,5 @@ services:
       VOICE_WEBHOOK_URL: ${VOICE_WEBHOOK_URL:-http://localhost:8089}
 
 volumes:
-  ALPHA-pg-data:
-  ALPHA-redis-data:
+  alpha-pg-data:
+  alpha-redis-data:

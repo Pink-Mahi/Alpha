@@ -56,7 +56,7 @@ resource "aws_iam_role" "eks_cluster" {
 }
 
 resource "aws_db_instance" "postgres" {
-  identifier        = "ALPHA-pg-${var.env}"
+  identifier        = "alpha-pg-${var.env}"
   engine            = "postgres"
   engine_version    = "16.2"
   instance_class    = "db.t4g.small"
@@ -71,7 +71,7 @@ resource "aws_db_instance" "postgres" {
 }
 
 resource "aws_elasticache_cluster" "redis" {
-  cluster_id           = "ALPHA-redis-${var.env}"
+  cluster_id           = "alpha-redis-${var.env}"
   engine               = "redis"
   engine_version       = "7.1"
   node_type            = "cache.t4g.micro"

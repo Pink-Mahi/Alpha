@@ -22,7 +22,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/ALPHA_model_router"]
+packages = ["src/alpha_model_router"]
 
 [tool.ruff]
 line-length = 100
