@@ -1,0 +1,40 @@
+# Docker Compose — local dev infrastructure for Cascade.
+# Starts Postgres (with pgvector) + Redis for the control plane.
+#
+# Usage: docker compose up -d
+# Then: DATABASE_URL=postgres://cascade:cascade@localhost:5432/cascade
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: cascade-postgres
+    environment:
+      POSTGRES_USER: cascade
+      POSTGRES_PASSWORD: cascade
+      POSTGRES_DB: cascade
+    ports:
+      - "5432:5432"
+    volumes:
+      - cascade-pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cascade"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: cascade-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - cascade-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  cascade-pg-data:
+  cascade-redis-data:
