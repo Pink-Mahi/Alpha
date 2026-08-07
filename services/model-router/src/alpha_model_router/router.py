@@ -11,6 +11,7 @@ from typing import AsyncIterator
 from .providers.base import ModelId, ProviderAdapter, RouterRequest, RouterResponse
 from .providers.anthropic import AnthropicAdapter
 from .providers.openai import OpenAIAdapter
+from .providers.openrouter import OpenRouterAdapter
 
 
 class ModelRouter:
@@ -18,6 +19,7 @@ class ModelRouter:
         self._adapters: dict[str, ProviderAdapter] = {}
         self.register(AnthropicAdapter())
         self.register(OpenAIAdapter())
+        self.register(OpenRouterAdapter())
 
     def register(self, adapter: ProviderAdapter) -> None:
         self._adapters[adapter.name] = adapter

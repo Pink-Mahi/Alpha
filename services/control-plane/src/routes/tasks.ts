@@ -64,6 +64,17 @@ taskRoutes.get("/v1/tasks/:id", async (c) => {
   return c.json({ task: rows[0], runs });
 });
 
+/** DELETE /v1/tasks/:id — delete a task and all related data (cascades to messages + runs). */
+taskRoutes.delete("/v1/tasks/:id", async (c) => {
+  const p = c.get("principal")!;
+  const id = c.req.param("id");
+  const db = getDb();
+  const rows = await db.select().from(task).where(and(eq(task.id, id), eq(task.org_id, p.org_id))).limit(1);
+  if (rows.length === 0) return c.json({ error: "not_found" }, 404);
+  await db.delete(task).where(and(eq(task.id, id), eq(task.org_id, p.org_id)));
+  return c.json({ ok: true, id });
+});
+
 /** Start the agent on a task. Fetches BYO key, dispatches to local agent. */
 taskRoutes.post("/v1/tasks/:id/start", async (c) => {
   const p = c.get("principal")!;

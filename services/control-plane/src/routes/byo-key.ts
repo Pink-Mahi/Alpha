@@ -10,7 +10,7 @@ import type { AuthPrincipal } from "../auth/index.ts";
 
 export const byoKeyRoutes = new Hono<{ Variables: { principal: AuthPrincipal } }>();
 
-const providers = ["anthropic", "openai", "xai", "google"] as const;
+const providers = ["anthropic", "openai", "xai", "google", "openrouter"] as const;
 
 const createSchema = z.object({
   provider: z.enum(providers),

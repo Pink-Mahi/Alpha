@@ -10,6 +10,7 @@ interface ByoKey {
 const PROVIDERS = [
   { id: "anthropic", name: "Anthropic (Claude)", prefix: "sk-ant-", url: "https://console.anthropic.com" },
   { id: "openai", name: "OpenAI (GPT)", prefix: "sk-", url: "https://platform.openai.com/api-keys" },
+  { id: "openrouter", name: "OpenRouter (100+ models)", prefix: "sk-or-", url: "https://openrouter.ai/keys" },
   { id: "xai", name: "xAI (Grok)", prefix: "xai-", url: "https://console.x.ai" },
   { id: "google", name: "Google (Gemini)", prefix: "AI", url: "https://aistudio.google.com/apikey" },
 ];

@@ -298,6 +298,18 @@ export function TaskDetail() {
           background: task.status === "complete" ? "#238636" : task.status === "running" ? "#1f6feb" : task.status === "failed" ? "#f85149" : "var(--border)",
           color: "white",
         }}>{task.status}</span>
+        <button
+          className="btn btn-secondary"
+          style={{ fontSize: "0.75rem", padding: "0.25rem 0.6rem", color: "#f85149" }}
+          onClick={async () => {
+            if (!confirm(`Delete "${task.title}"? This cannot be undone.`)) return;
+            const token = localStorage.getItem("alpha_token");
+            try {
+              await fetch(`/v1/tasks/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
+              navigate("/tasks");
+            } catch { /* ignore */ }
+          }}
+        >🗑 Delete</button>
       </div>
 
       {error && (

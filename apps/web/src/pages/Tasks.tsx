@@ -205,13 +205,28 @@ export function Tasks() {
                   {t.model ? t.model.split(":")[1] ?? t.model : "auto"} · {new Date(t.created_at).toLocaleDateString()}
                 </div>
               </div>
-              <span style={{
-                padding: "0.25rem 0.6rem",
-                borderRadius: "4px",
-                fontSize: "0.7rem",
-                background: t.status === "complete" ? "#238636" : t.status === "running" ? "#1f6feb" : t.status === "failed" ? "#f85149" : "var(--border)",
-                color: "white",
-              }}>{t.status}</span>
+              <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+                <span style={{
+                  padding: "0.25rem 0.6rem",
+                  borderRadius: "4px",
+                  fontSize: "0.7rem",
+                  background: t.status === "complete" ? "#238636" : t.status === "running" ? "#1f6feb" : t.status === "failed" ? "#f85149" : "var(--border)",
+                  color: "white",
+                }}>{t.status}</span>
+                <button
+                  className="btn btn-secondary"
+                  style={{ fontSize: "0.7rem", padding: "0.2rem 0.5rem", color: "#f85149" }}
+                  onClick={async (e) => {
+                    e.stopPropagation();
+                    if (!confirm(`Delete "${t.title}"? This cannot be undone.`)) return;
+                    const token = localStorage.getItem("alpha_token");
+                    try {
+                      await fetch(`/v1/tasks/${t.id}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
+                      setTasks(tasks.filter((x) => x.id !== t.id));
+                    } catch { /* ignore */ }
+                  }}
+                >🗑</button>
+              </div>
             </div>
           ))
         )}
