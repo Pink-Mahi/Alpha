@@ -49,8 +49,19 @@ export function TaskDetail() {
       const resp = await fetch(`/v1/tasks/${id}`, { headers: { Authorization: `Bearer ${token}` } });
       if (resp.ok) {
         const data = await resp.json();
-        setTask(data.task);
+        if (data.task) {
+          setTask(data.task);
+        } else {
+          setError("Task data missing from response");
+        }
+      } else if (resp.status === 401) {
+        navigate("/login");
+        return;
+      } else {
+        setError(`Failed to load task (status ${resp.status})`);
       }
+    } catch (e) {
+      setError(`Network error: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setLoading(false);
     }
