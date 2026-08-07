@@ -19,7 +19,7 @@ let _browser: any = null;
 let _context: any = null;
 let _page: any = null;
 
-async function getBrowser(): Promise<any> {
+export async function getBrowser(): Promise<any> {
   if (!_browser) {
     const { chromium } = await import("playwright");
     _browser = await chromium.launch({ headless: true });

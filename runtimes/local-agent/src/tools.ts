@@ -14,6 +14,7 @@ import { join, relative, isAbsolute } from "node:path";
 import { browserNavigate, browserScreenshot, browserClick, browserFill, browserExtract, browserGetHtml, browserAnalyzeSeo, browserScroll, browserListElements, browserWait } from "./browserTools.js";
 import { memoryRecall, memoryLearn, memoryGuideline, memoryList } from "./memoryTools.js";
 import { codeRun, httpRequest, fsEdit, deployStatic, createVisionTool, createImageGenTool } from "./advancedTools.js";
+import { dbQuery, dbExecute, browserAnalyzeAccessibility, browserLighthouse, notifyWebhook, testGenerate, browserSetViewport } from "./tier2Tools.js";
 import type { ModelRouterClient } from "./modelRouterClient.js";
 
 import type { ToolDef, ToolContext } from "./toolBus.js";
@@ -409,4 +410,12 @@ export function registerBuiltinTools(bus: import("./toolBus.js").ToolBus, router
     bus.register(createVisionTool(router, defaultModel ?? "openai:gpt-4o", apiKey));
     bus.register(createImageGenTool(router, apiKey));
   }
+  // Tier 2 tools
+  bus.register(dbQuery);
+  bus.register(dbExecute);
+  bus.register(browserAnalyzeAccessibility);
+  bus.register(browserLighthouse);
+  bus.register(notifyWebhook);
+  bus.register(testGenerate);
+  bus.register(browserSetViewport);
 }
