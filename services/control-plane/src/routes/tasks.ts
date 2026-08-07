@@ -93,8 +93,9 @@ taskRoutes.post("/v1/tasks/:id/start", async (c) => {
   const decryptedKey = Buffer.from(preferredKey.encrypted_key, "base64").toString("utf8");
 
   // Use the model selected at task creation, or fall back to a default
-  // based on the available provider key
-  const model = t.model ??
+  // based on the available provider key. Note: use || not ?? because
+  // older tasks may have model='' (empty string) instead of null.
+  const model = t.model ||
     (preferredKey.provider === "anthropic"
       ? "anthropic:claude-3-5-sonnet-latest"
       : preferredKey.provider === "openai"
