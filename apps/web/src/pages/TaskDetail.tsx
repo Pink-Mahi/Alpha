@@ -869,8 +869,9 @@ function EventRow({ event }: { event: AgentEvent }) {
       const isDb = tool.startsWith("db.");
       const isNotify = tool.startsWith("notify.");
       const isTest = tool.startsWith("test.");
-      const icon = isBrowser ? "WEB" : isWeb ? "SRCH" : isMemory ? "MEM" : isVision ? "VIS" : isCode ? "RUN" : isHttp ? "HTTP" : isDeploy ? "DEPL" : isImage ? "IMG" : isDb ? "DB" : isNotify ? "NOTIF" : isTest ? "TEST" : "TOOL";
-      const color = isBrowser ? "#1f6feb" : isWeb ? "#a371f7" : isMemory ? "#238636" : isVision ? "#f0883e" : isCode ? "#d29922" : isHttp ? "#1f6feb" : isDeploy ? "#238636" : isImage ? "#f0883e" : isDb ? "#1f6feb" : isNotify ? "#d29922" : isTest ? "#238636" : "#d29922";
+      const isMobile = tool.startsWith("mobile.");
+      const icon = isBrowser ? "WEB" : isWeb ? "SRCH" : isMemory ? "MEM" : isVision ? "VIS" : isCode ? "RUN" : isHttp ? "HTTP" : isDeploy ? "DEPL" : isImage ? "IMG" : isDb ? "DB" : isNotify ? "NOTIF" : isTest ? "TEST" : isMobile ? "MOB" : "TOOL";
+      const color = isBrowser ? "#1f6feb" : isWeb ? "#a371f7" : isMemory ? "#238636" : isVision ? "#f0883e" : isCode ? "#d29922" : isHttp ? "#1f6feb" : isDeploy ? "#238636" : isImage ? "#f0883e" : isDb ? "#1f6feb" : isNotify ? "#d29922" : isTest ? "#238636" : isMobile ? "#f0883e" : "#d29922";
       return (
         <div style={{ fontSize: "0.8125rem", color, marginBottom: "0.25rem", paddingLeft: "0.5rem" }}>
           {icon} {tool}({argPreview}{Object.keys(args).length > 2 ? "..." : ""})

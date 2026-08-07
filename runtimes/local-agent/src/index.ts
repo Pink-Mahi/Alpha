@@ -1,12 +1,12 @@
-/**
- * Local agent runtime — HTTP server that the IDE extension connects to.
+﻿/**
+ * Local agent runtime â€” HTTP server that the IDE extension connects to.
  *
  * Exposes:
  *   GET  /healthz
- *   POST /v1/agent/start   — start a coding task
- *   GET  /v1/agent/:id     — get task status
- *   POST /v1/agent/:id/kill — kill a running task
- *   WSS  /v1/agent/:id/stream — live event stream
+ *   POST /v1/agent/start   â€” start a coding task
+ *   GET  /v1/agent/:id     â€” get task status
+ *   POST /v1/agent/:id/kill â€” kill a running task
+ *   WSS  /v1/agent/:id/stream â€” live event stream
  *
  * The runtime runs as a subprocess of the IDE (or tray agent) and has
  * filesystem access to the user's working directory.
@@ -94,6 +94,7 @@ app.post("/v1/agent/start", async (c) => {
       "vision.analyze", "code.run", "http.request", "fs.edit", "deploy.static", "image.generate",
       "db.query", "db.execute", "browser.analyze_accessibility", "browser.lighthouse",
       "notify.webhook", "test.generate", "browser.set_viewport",
+      "mobile.convert", "mobile.config", "mobile.icon", "mobile.build", "mobile.run",
     ]),
     onEvent: (env) => events.push(env),
     requestApproval: async (tool, args, reason) => {
@@ -158,7 +159,7 @@ interface SwarmTask {
   status: "coordinating" | "running" | "complete" | "failed";
   subtasks: string[];
   sharedContext: Map<string, string>;
-  supervisorDirectives: Map<string, string[]>; // workerAgentId → directives from supervisors
+  supervisorDirectives: Map<string, string[]>; // workerAgentId â†’ directives from supervisors
   userMessages: Array<{ id: string; text: string; ts: string; source: "web" | "telegram" | "voice" }>; // real-time user messages to supervisor
 }
 const swarms = new Map<string, SwarmTask>();
@@ -181,7 +182,7 @@ const swarmSchema = z.object({
   persistence_mode: z.enum(["standard", "persistent", "relentless"]).default("standard"),
 });
 
-/** POST /v1/agent/swarm — start N agents working on subtasks of the same project. */
+/** POST /v1/agent/swarm â€” start N agents working on subtasks of the same project. */
 app.post("/v1/agent/swarm", async (c) => {
   const parsed = swarmSchema.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) return c.json({ error: "invalid_body", issues: parsed.error.issues }, 400);
@@ -278,6 +279,7 @@ Original task: ${body.spec}`;
       "vision.analyze", "code.run", "http.request", "fs.edit", "deploy.static", "image.generate",
       "db.query", "db.execute", "browser.analyze_accessibility", "browser.lighthouse",
       "notify.webhook", "test.generate", "browser.set_viewport",
+      "mobile.convert", "mobile.config", "mobile.icon", "mobile.build", "mobile.run",
       ]),
       reflectionInterval: 5,
       externalContext: [],
@@ -329,7 +331,7 @@ Original task: ${body.spec}`;
 
       const supSpec = `You are Supervisor Agent ${supNum}, overseeing ${subtasks.length} worker agents working on a shared project.
 
-You are the QUALITY GATEKEEPER. Your job is to ensure the final product is the BEST POSSIBLE result — not just "done" but "excellent".
+You are the QUALITY GATEKEEPER. Your job is to ensure the final product is the BEST POSSIBLE result â€” not just "done" but "excellent".
 
 Your role:
 1. RESEARCH: Use web.search to research best practices, competitor products, and state-of-the-art approaches relevant to the task. Share your findings with workers via directives.
@@ -383,6 +385,7 @@ The user is your boss. Their feedback overrides any default assumptions you have
       "vision.analyze", "code.run", "http.request", "fs.edit", "deploy.static", "image.generate",
       "db.query", "db.execute", "browser.analyze_accessibility", "browser.lighthouse",
       "notify.webhook", "test.generate", "browser.set_viewport",
+      "mobile.convert", "mobile.config", "mobile.icon", "mobile.build", "mobile.run",
         ]),
         reflectionInterval: 3,
         onEvent: (env) => supEvents.push(env),
@@ -406,7 +409,7 @@ The user is your boss. Their feedback overrides any default assumptions you have
       console.log(`[swarm:${swarmId.slice(0, 8)}] supervisor ${supNum} started: ${supTaskId.slice(0, 8)} (model: ${supModel})`);
     }
 
-    // Start the supervisor orchestration loop — polls worker progress and applies directives
+    // Start the supervisor orchestration loop â€” polls worker progress and applies directives
     runSupervisorLoop(swarm, body.cwd, body.persistence_mode);
   }
 
@@ -421,7 +424,7 @@ The user is your boss. Their feedback overrides any default assumptions you have
   }, 201);
 });
 
-/** Supervisor orchestration loop — monitors workers and applies directives. */
+/** Supervisor orchestration loop â€” monitors workers and applies directives. */
 async function runSupervisorLoop(swarm: SwarmTask, cwd: string, persistenceMode: string = "standard") {
   const { readFileSync, unlinkSync, existsSync } = await import("node:fs");
   const { join } = await import("node:path");
@@ -458,7 +461,7 @@ async function runSupervisorLoop(swarm: SwarmTask, cwd: string, persistenceMode:
 
             const workerTask = tasks.get(swarm.agentIds[i]!);
             if (workerTask && workerTask.status === "running") {
-              // Worker is still running — inject directive into its context
+              // Worker is still running â€” inject directive into its context
               workerTask.events.push({
                 version: "1.0",
                 org_id: workerTask.config.orgId,
@@ -474,7 +477,7 @@ async function runSupervisorLoop(swarm: SwarmTask, cwd: string, persistenceMode:
                 workerTask.config.externalContext.push(`[SUPERVISOR DIRECTIVE]\n${directive}`);
               }
             } else if (workerTask && (workerTask.status === "complete" || workerTask.status === "failed") && refinementRound < maxRefinementRounds) {
-              // Worker is done but supervisor has a directive — restart for refinement
+              // Worker is done but supervisor has a directive â€” restart for refinement
               console.log(`[swarm:${swarm.id.slice(0, 8)}] restarting agent ${agentNum} for refinement round ${refinementRound + 1}`);
               refinementRound++;
               workerTask.status = "running";
@@ -509,7 +512,7 @@ async function runSupervisorLoop(swarm: SwarmTask, cwd: string, persistenceMode:
   }
 }
 
-/** POST /v1/agent/swarm/:id/message — inject a user message into the running swarm (sent to supervisor). */
+/** POST /v1/agent/swarm/:id/message â€” inject a user message into the running swarm (sent to supervisor). */
 app.post("/v1/agent/swarm/:id/message", async (c) => {
   const swarm = swarms.get(c.req.param("id"));
   if (!swarm) return c.json({ error: "not_found" }, 404);
@@ -547,14 +550,14 @@ app.post("/v1/agent/swarm/:id/message", async (c) => {
   return c.json({ ok: true, message_id: msgId, delivered_to: swarm.supervisorIds.length });
 });
 
-/** GET /v1/agent/swarm/:id/messages — get all user messages for a swarm. */
+/** GET /v1/agent/swarm/:id/messages â€” get all user messages for a swarm. */
 app.get("/v1/agent/swarm/:id/messages", (c) => {
   const swarm = swarms.get(c.req.param("id"));
   if (!swarm) return c.json({ error: "not_found" }, 404);
   return c.json({ messages: swarm.userMessages });
 });
 
-/** GET /v1/agent/swarm/:id — get swarm status (all agents). */
+/** GET /v1/agent/swarm/:id â€” get swarm status (all agents). */
 app.get("/v1/agent/swarm/:id", (c) => {
   const swarm = swarms.get(c.req.param("id"));
   if (!swarm) return c.json({ error: "not_found" }, 404);

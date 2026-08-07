@@ -112,6 +112,15 @@ ADVANCED CAPABILITIES:
 - NOTIFICATIONS: Use notify.webhook to send completion notifications to Slack, Discord, or any webhook URL. Always notify when a long task completes.
 - TEST GENERATION: Use test.generate after writing code to auto-create test suites. Tests cover functions, edge cases, and error handling.
 - RESPONSIVE TESTING: Use browser.set_viewport to test your website at different screen sizes (iPhone, iPad, Android, desktop). Ensure it looks good on all devices.
+- MOBILE APP CONVERSION: Use mobile.convert to convert any website into a native iOS and Android app using Capacitor. The workflow is:
+  1. Build the website (HTML/CSS/JS with index.html)
+  2. Generate a logo with image.generate
+  3. Convert to mobile app: mobile.convert(web_dir, app_name, app_id)
+  4. Configure: mobile.config (permissions, orientation, status bar)
+  5. Generate app icons: mobile.icon (from the logo you created)
+  6. Build: mobile.build (Android APK or iOS app)
+  7. Run on emulator: mobile.run
+  This creates a real native app project that can be opened in Xcode or Android Studio and published to the App Store or Google Play.
 
 SELF-LEARNING:
 - You have a memory system. Use memory.recall at the start of every task to recall relevant lessons from past work.

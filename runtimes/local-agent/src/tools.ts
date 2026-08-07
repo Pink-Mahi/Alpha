@@ -15,6 +15,7 @@ import { browserNavigate, browserScreenshot, browserClick, browserFill, browserE
 import { memoryRecall, memoryLearn, memoryGuideline, memoryList } from "./memoryTools.js";
 import { codeRun, httpRequest, fsEdit, deployStatic, createVisionTool, createImageGenTool } from "./advancedTools.js";
 import { dbQuery, dbExecute, browserAnalyzeAccessibility, browserLighthouse, notifyWebhook, testGenerate, browserSetViewport } from "./tier2Tools.js";
+import { mobileConvert, mobileConfig, mobileIcon, mobileBuild, mobileRun } from "./mobileTools.js";
 import type { ModelRouterClient } from "./modelRouterClient.js";
 
 import type { ToolDef, ToolContext } from "./toolBus.js";
@@ -418,4 +419,10 @@ export function registerBuiltinTools(bus: import("./toolBus.js").ToolBus, router
   bus.register(notifyWebhook);
   bus.register(testGenerate);
   bus.register(browserSetViewport);
+  // Mobile app tools (website to native app conversion)
+  bus.register(mobileConvert);
+  bus.register(mobileConfig);
+  bus.register(mobileIcon);
+  bus.register(mobileBuild);
+  bus.register(mobileRun);
 }
