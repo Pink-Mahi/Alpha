@@ -25,6 +25,7 @@ const createSchema = z.object({
   supervisor_enabled: z.boolean().default(false),
   supervisor_count: z.number().int().min(0).max(2).default(0),
   supervisor_models: z.array(z.string()).optional(),
+  persistence_mode: z.enum(["standard", "persistent", "relentless"]).default("standard"),
 });
 
 taskRoutes.use("*", authMiddleware());
@@ -52,6 +53,7 @@ taskRoutes.post("/v1/tasks", async (c) => {
       supervisor_enabled: body.supervisor_enabled,
       supervisor_count: body.supervisor_count,
       supervisor_models: body.supervisor_models ? JSON.stringify(body.supervisor_models) : null,
+      persistence_mode: body.persistence_mode,
     })
     .returning();
   return c.json({ task: t[0] }, 201);
@@ -159,6 +161,7 @@ taskRoutes.post("/v1/tasks/:id/start", async (c) => {
       supervisor_enabled: t.supervisor_enabled ?? false,
       supervisor_count: t.supervisor_count ?? 0,
       supervisor_models: supervisorModels,
+      persistence_mode: t.persistence_mode ?? "standard",
     };
 
     let swarmResp: Response;

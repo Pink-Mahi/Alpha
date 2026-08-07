@@ -265,6 +265,108 @@ export const searchFiles: ToolDef = {
   },
 };
 
+// --- Web tools (internet research capability) --------------------------------
+
+export const webSearch: ToolDef = {
+  name: "web.search",
+  description: "Search the internet for information. Use this to research APIs, libraries, documentation, current events, scientific papers, or any topic relevant to your task. Returns search result titles, URLs, and snippets.",
+  inputSchema: z.object({
+    query: z.string().describe("The search query."),
+    max_results: z.number().int().min(1).max(20).default(5).describe("Maximum number of results to return."),
+  }),
+  outputSchema: z.object({
+    results: z.array(z.object({
+      title: z.string(),
+      url: z.string(),
+      snippet: z.string(),
+    })),
+  }),
+  permissionsRequired: ["web.search"],
+  sideEffect: "read",
+  requiresApproval: false,
+  async execute({ query, max_results }) {
+    // Use DuckDuckGo's HTML endpoint (no API key required)
+    try {
+      const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
+      const resp = await fetch(url, {
+        headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!resp.ok) {
+        return { results: [] };
+      }
+      const html = await resp.text();
+      // Parse results from DuckDuckGo HTML
+      const results: Array<{ title: string; url: string; snippet: string }> = [];
+      const linkRegex = /class="result__a"[^>]*href="([^"]*)"[^>]*>(.*?)<\/a>/gs;
+      const snippetRegex = /class="result__snippet"[^>]*>(.*?)<\/(?:a|span|div)>/gs;
+      const links = [...html.matchAll(linkRegex)];
+      const snippets = [...html.matchAll(snippetRegex)];
+      for (let i = 0; i < Math.min(links.length, max_results); i++) {
+        const linkMatch = links[i];
+        if (!linkMatch) continue;
+        const title = (linkMatch[2] ?? "").replace(/<[^>]*>/g, "").trim();
+        const rawUrl = linkMatch[1] ?? "";
+        const urlMatch = rawUrl.match(/uddg=([^&]+)/);
+        const cleanUrl = urlMatch ? decodeURIComponent(urlMatch[1]!) : rawUrl;
+        const snippetMatch = snippets[i];
+        const snippet = snippetMatch ? (snippetMatch[1] ?? "").replace(/<[^>]*>/g, "").trim() : "";
+        results.push({ title, url: cleanUrl, snippet });
+      }
+      return { results };
+    } catch (e) {
+      return { results: [] };
+    }
+  },
+};
+
+export const webFetch: ToolDef = {
+  name: "web.fetch",
+  description: "Fetch the content of a web page and return it as text. Use this to read documentation pages, API references, articles, or any web resource found via web.search.",
+  inputSchema: z.object({
+    url: z.string().describe("The URL to fetch."),
+    max_chars: z.number().int().min(100).max(50000).default(10000).describe("Maximum characters to return."),
+  }),
+  outputSchema: z.object({
+    content: z.string(),
+    url: z.string(),
+    status: z.number(),
+  }),
+  permissionsRequired: ["web.fetch"],
+  sideEffect: "read",
+  requiresApproval: false,
+  async execute({ url, max_chars }) {
+    try {
+      const resp = await fetch(url, {
+        headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+        signal: AbortSignal.timeout(20000),
+        redirect: "follow",
+      });
+      const text = await resp.text();
+      // Strip HTML tags for a cleaner text output
+      const stripped = text
+        .replace(/<script[^>]*>.*?<\/script>/gs, "")
+        .replace(/<style[^>]*>.*?<\/style>/gs, "")
+        .replace(/<[^>]*>/g, " ")
+        .replace(/&nbsp;/g, " ")
+        .replace(/&amp;/g, "&")
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/\s+/g, " ")
+        .trim();
+      return {
+        content: stripped.slice(0, max_chars),
+        url: resp.url,
+        status: resp.status,
+      };
+    } catch (e) {
+      return { content: `Error fetching URL: ${e}`, url, status: 0 };
+    }
+  },
+};
+
 /** Register all built-in tools on a ToolBus. */
 export function registerBuiltinTools(bus: import("./toolBus.js").ToolBus): void {
   bus.register(fsRead);
@@ -276,4 +378,6 @@ export function registerBuiltinTools(bus: import("./toolBus.js").ToolBus): void 
   bus.register(gitCommit);
   bus.register(searchGrep);
   bus.register(searchFiles);
+  bus.register(webSearch);
+  bus.register(webFetch);
 }

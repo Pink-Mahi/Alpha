@@ -43,6 +43,13 @@
       "when": 1786135471402,
       "tag": "0005_silent_magik",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1786136186183,
+      "tag": "0006_amused_dracula",
+      "breakpoints": true
     }
   ]
 }

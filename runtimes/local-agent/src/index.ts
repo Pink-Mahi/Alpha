@@ -87,6 +87,7 @@ app.post("/v1/agent/start", async (c) => {
       "fs.read", "fs.write", "fs.list",
       "shell.exec", "git.read", "git.write",
       "search.grep", "search.files",
+      "web.search", "web.fetch",
     ]),
     onEvent: (env) => events.push(env),
     requestApproval: async (tool, args, reason) => {
@@ -170,6 +171,7 @@ const swarmSchema = z.object({
   supervisor_enabled: z.boolean().default(false),
   supervisor_count: z.number().int().min(0).max(2).default(0),
   supervisor_models: z.array(z.string()).optional(),
+  persistence_mode: z.enum(["standard", "persistent", "relentless"]).default("standard"),
 });
 
 /** POST /v1/agent/swarm — start N agents working on subtasks of the same project. */
@@ -220,7 +222,9 @@ app.post("/v1/agent/swarm", async (c) => {
   // Step 2: Start N agent loops in parallel
   swarm.status = "running";
   const budgetPerAgent = body.budget_usd / body.agent_count;
-  const maxIterPerAgent = Math.max(5, Math.floor(body.max_iterations / body.agent_count) + 5);
+  // Adjust iterations based on persistence mode
+  const persistenceMultiplier = body.persistence_mode === "relentless" ? 3 : body.persistence_mode === "persistent" ? 2 : 1;
+  const maxIterPerAgent = Math.max(5, Math.floor(body.max_iterations / body.agent_count) + 5) * persistenceMultiplier;
 
   for (let i = 0; i < subtasks.length; i++) {
     const agentTaskId = randomUUID();
@@ -258,7 +262,10 @@ Original task: ${body.spec}`;
         "fs.read", "fs.write", "fs.list",
         "shell.exec", "git.read", "git.write",
         "search.grep", "search.files",
+        "web.search", "web.fetch",
       ]),
+      reflectionInterval: 5,
+      externalContext: [],
       onEvent: (env) => {
         events.push(env);
         // Capture assistant responses for cross-agent sharing
@@ -307,20 +314,29 @@ Original task: ${body.spec}`;
 
       const supSpec = `You are Supervisor Agent ${supNum}, overseeing ${subtasks.length} worker agents working on a shared project.
 
+You are the QUALITY GATEKEEPER. Your job is to ensure the final product is the BEST POSSIBLE result — not just "done" but "excellent".
+
 Your role:
-1. MONITOR: Watch the worker agents' progress by reading files they create and reviewing their outputs.
-2. DIRECTIVE: When you notice a worker going off-track, producing low-quality code, or missing requirements, write a directive message that will be sent to that worker.
-3. QUALITY: Ensure the final product meets the highest standards. Check for bugs, missing features, and code quality issues.
-4. COORDINATION: If two workers are conflicting (editing the same files), redirect one to a different approach.
+1. RESEARCH: Use web.search to research best practices, competitor products, and state-of-the-art approaches relevant to the task. Share your findings with workers via directives.
+2. MONITOR: Watch the worker agents' progress by reading files they create and reviewing their outputs.
+3. DIRECTIVE: When you notice a worker going off-track, producing low-quality code, or missing requirements, write a directive message that will be sent to that worker.
+4. QUALITY GATE: When workers complete their tasks, evaluate the quality:
+   - Does it meet all requirements from the original task?
+   - Is the code quality excellent (not just functional)?
+   - Are there bugs, edge cases, or missing features?
+   - Is it the best possible implementation?
+   If quality is not excellent, write a directive telling the worker exactly what to fix.
+5. COORDINATION: If two workers are conflicting (editing the same files), redirect one to a different approach.
+6. PERSISTENCE: Do NOT accept "done" as good enough. Keep directing workers to improve until the result is truly excellent.
 
 Worker agents and their subtasks:
 ${subtasks.map((st, i) => `  Agent ${i + 1} (${models[i]}): ${st}`).join("\n")}
 
 Original task: ${body.spec}
 
-You have filesystem tools. Read the files workers are creating. When you want to send a directive to a worker, write it to a file called .supervisor_directive_agentN.txt (where N is the agent number). The system will pick it up and redirect that worker.
+You have filesystem tools AND web research tools. Use web.search to find best practices and share them with workers. Read the files workers are creating. When you want to send a directive to a worker, write it to a file called .supervisor_directive_agentN.txt (where N is the agent number). The system will pick it up and redirect that worker.
 
-Be proactive. Don't wait until the end to review — check in periodically and guide the workers toward the best possible outcome.`;
+You are the last line of defense for quality. Be demanding. Be thorough. Be proactive. The user wants the BEST possible result, not just an adequate one.`;
 
       const supConfig: AgentLoopConfig = {
         orgId: body.org_id ?? "00000000-0000-0000-0000-000000000000",
@@ -336,7 +352,9 @@ Be proactive. Don't wait until the end to review — check in periodically and g
           "fs.read", "fs.write", "fs.list",
           "shell.exec", "git.read", "git.write",
           "search.grep", "search.files",
+          "web.search", "web.fetch",
         ]),
+        reflectionInterval: 3,
         onEvent: (env) => supEvents.push(env),
         requestApproval: async () => true,
         apiKey: supKey,
@@ -359,7 +377,7 @@ Be proactive. Don't wait until the end to review — check in periodically and g
     }
 
     // Start the supervisor orchestration loop — polls worker progress and applies directives
-    runSupervisorLoop(swarm, body.cwd);
+    runSupervisorLoop(swarm, body.cwd, body.persistence_mode);
   }
 
   return c.json({
@@ -374,12 +392,15 @@ Be proactive. Don't wait until the end to review — check in periodically and g
 });
 
 /** Supervisor orchestration loop — monitors workers and applies directives. */
-async function runSupervisorLoop(swarm: SwarmTask, cwd: string) {
+async function runSupervisorLoop(swarm: SwarmTask, cwd: string, persistenceMode: string = "standard") {
   const { readFileSync, unlinkSync, existsSync } = await import("node:fs");
   const { join } = await import("node:path");
-  const checkInterval = 5000; // check every 5 seconds
+  const checkInterval = 5000;
   let checkCount = 0;
-  const maxChecks = 60; // max 5 minutes of supervision
+  const maxChecks = 120;
+  let refinementRound = 0;
+  // Persistence mode controls how many times supervisor can restart workers for quality
+  const maxRefinementRounds = persistenceMode === "relentless" ? 10 : persistenceMode === "persistent" ? 5 : 3;
 
   while (checkCount < maxChecks) {
     await new Promise((r) => setTimeout(r, checkInterval));
@@ -400,14 +421,14 @@ async function runSupervisorLoop(swarm: SwarmTask, cwd: string) {
           const directive = readFileSync(directiveFile, "utf8").trim();
           if (directive) {
             console.log(`[swarm:${swarm.id.slice(0, 8)}] supervisor directive for agent ${agentNum}: ${directive.slice(0, 100)}...`);
-            // Store the directive
             if (!swarm.supervisorDirectives.has(swarm.agentIds[i]!)) {
               swarm.supervisorDirectives.set(swarm.agentIds[i]!, []);
             }
             swarm.supervisorDirectives.get(swarm.agentIds[i]!)!.push(directive);
-            // Emit a directive event to the worker's event stream
+
             const workerTask = tasks.get(swarm.agentIds[i]!);
             if (workerTask && workerTask.status === "running") {
+              // Worker is still running — inject directive into its context
               workerTask.events.push({
                 version: "1.0",
                 org_id: workerTask.config.orgId,
@@ -418,6 +439,32 @@ async function runSupervisorLoop(swarm: SwarmTask, cwd: string) {
                 type: "supervisor.directive",
                 payload: { directive, from: "supervisor" },
               } as unknown as AgentMessageEnvelope);
+              // Also inject into the agent's external context for self-reflection
+              if (workerTask.config.externalContext) {
+                workerTask.config.externalContext.push(`[SUPERVISOR DIRECTIVE]\n${directive}`);
+              }
+            } else if (workerTask && (workerTask.status === "complete" || workerTask.status === "failed") && refinementRound < maxRefinementRounds) {
+              // Worker is done but supervisor has a directive — restart for refinement
+              console.log(`[swarm:${swarm.id.slice(0, 8)}] restarting agent ${agentNum} for refinement round ${refinementRound + 1}`);
+              refinementRound++;
+              workerTask.status = "running";
+              workerTask.result = undefined;
+              // Inject directive as a new message
+              workerTask.config = {
+                ...workerTask.config,
+                spec: `${workerTask.config.spec}\n\n[SUPERVISOR REFINEMENT DIRECTIVE]\n${directive}\n\nImprove your work based on this feedback. The supervisor is not satisfied with the current quality.`,
+                messages: undefined, // fresh start with updated spec
+                externalContext: [directive],
+              };
+              const loop = new AgentLoop(bus, router);
+              loop.run(workerTask.config).then((result) => {
+                workerTask.result = result;
+                workerTask.status = result.success ? "complete" : "failed";
+                swarm.sharedContext.set(workerTask.id, `[Refined] ${result.summary}`);
+              }).catch((e) => {
+                workerTask.status = "failed";
+                workerTask.result = { summary: String(e), costUsd: 0, iterations: 0, success: false };
+              });
             }
           }
           unlinkSync(directiveFile);
@@ -425,8 +472,8 @@ async function runSupervisorLoop(swarm: SwarmTask, cwd: string) {
       }
     }
 
-    if (allWorkersDone) {
-      console.log(`[swarm:${swarm.id.slice(0, 8)}] all workers done, supervisor loop ending`);
+    if (allWorkersDone && refinementRound >= maxRefinementRounds) {
+      console.log(`[swarm:${swarm.id.slice(0, 8)}] all workers done, max refinement reached, supervisor loop ending`);
       break;
     }
   }

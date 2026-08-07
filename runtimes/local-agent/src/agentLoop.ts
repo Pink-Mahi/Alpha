@@ -24,17 +24,17 @@ export interface AgentLoopConfig {
   cwd: string;
   budgetUsd: number;
   maxIterations: number;
-  model: string; // e.g. "anthropic:claude-3-5-sonnet-latest"
+  model: string;
   toolAllowList?: string[];
   permissions: Set<string>;
-  /** Called for each agent protocol event emitted by the loop. */
   onEvent: (env: AgentMessageEnvelope) => void;
-  /** Approval callback (passed to ToolContext). */
   requestApproval: ToolContext["requestApproval"];
-  /** BYO-key for the model provider, if using managed routing. */
   apiKey?: string;
-  /** Pre-loaded conversation history (for multi-turn chat). */
   messages?: Array<{ role: string; content: string }>;
+  /** Enable self-reflection every N iterations (default: every 5). */
+  reflectionInterval?: number;
+  /** Extra context injected into reflections (e.g. supervisor directives, other agents' outputs). */
+  externalContext?: string[];
 }
 
 export interface AgentLoopResult {
@@ -44,25 +44,39 @@ export interface AgentLoopResult {
   success: boolean;
 }
 
-const SYSTEM_PROMPT = `You are ALPHA, an autonomous coding agent. You work inside a developer's repository and complete coding tasks by:
-1. Reading files to understand the codebase
-2. Planning your approach
-3. Editing files and running commands
-4. Verifying your changes (tests, builds, linters)
-5. Summarizing what you did
+const SYSTEM_PROMPT = `You are ALPHA, an autonomous, self-aware AI agent. You work inside a developer's repository and complete tasks by:
+1. RESEARCHING — Use web.search and web.fetch to research anything you don't know. Look up APIs, documentation, scientific papers, best practices, competitor products, etc.
+2. READING — Read files to understand the codebase and context
+3. PLANNING — Plan your approach before executing
+4. EXECUTING — Edit files, run commands, write code
+5. VERIFYING — Run tests, builds, linters. Check your work.
+6. REFLECTING — Assess your progress. Are you on the right track? Is the quality good enough? What could be better?
+7. ITERATING — If the result isn't excellent, keep improving it.
 
-You have access to tools for filesystem operations, shell execution, git, and search.
-Always read files before editing them. Run tests after making changes.
-When you're done, provide a clear summary of what you changed and why.
-If a task is too complex or risky, say so rather than making destructive changes.
+You have access to tools for filesystem operations, shell execution, git, search, AND web research.
+Always read files before editing them. Run tests after making changes. Use web.search when you need information you don't have.
+
+SELF-AWARENESS:
+- You are aware of your own capabilities and limitations. If you don't know something, research it.
+- You reflect on your progress after each major step. Ask yourself: "Is this the best approach? What am I missing?"
+- You are persistent. You don't give up when something doesn't work — you try a different approach.
+- You are resourceful. If a library isn't available, find an alternative. If an API doesn't work, find another way.
+- You think about edge cases, error handling, and user experience.
+
+QUALITY STANDARD:
+- Your goal is not just "done" but "excellent". The best possible result.
+- If you're building a product, think about what would make it the best in its category.
+- If you're solving a problem, think about whether your solution is optimal or just adequate.
+- Consider performance, security, usability, and maintainability.
 
 IMPORTANT GUIDELINES:
 - The user is on WINDOWS. Do not use Unix-only modules like tty, termios, or curses.
-- For games or visual apps, prefer HTML/CSS/JavaScript (single .html file that runs in a browser) over Python terminal apps. This lets the user play/interact immediately.
+- For games or visual apps, prefer HTML/CSS/JavaScript (single .html file that runs in a browser) over Python terminal apps.
 - If you must use Python, use tkinter or pygame for GUI apps (not terminal-based).
 - Create self-contained files with no external dependencies when possible.
 - For web apps, create a single index.html with inline CSS and JS so it can be opened directly in a browser.
-- After creating files, mention the file path so the user can find and run them.`;
+- After creating files, mention the file path so the user can find and run them.
+- When doing research, cite your sources (URLs) in your summary.`;
 
 export class AgentLoop {
   private seq = 0;
@@ -106,6 +120,7 @@ export class AgentLoop {
     let iterations = 0;
     let success = false;
     let summary = "";
+    const reflectionInterval = config.reflectionInterval ?? 5;
 
     while (iterations < config.maxIterations) {
       iterations++;
@@ -115,6 +130,33 @@ export class AgentLoop {
           cost_usd: this.costUsd,
         });
         return { summary: "budget exceeded", costUsd: this.costUsd, iterations, success: false };
+      }
+
+      // Self-reflection: every N iterations, assess progress and adjust approach
+      if (iterations > 1 && iterations % reflectionInterval === 0) {
+        const reflection = await this.reflect(config, iterations);
+        if (reflection) {
+          this.emit(config, "state.event", {
+            kind: "self_reflection",
+            summary: reflection.slice(0, 200),
+          });
+          // Inject reflection into conversation to guide next steps
+          this.messages.push({
+            role: "user",
+            content: `[SELF-REFLECTION — Step ${iterations}]\n${reflection}\n\nContinue working on the task with these insights in mind.`,
+          } as Record<string, unknown>);
+        }
+      }
+
+      // Check for external context (supervisor directives, other agents' outputs)
+      if (config.externalContext && config.externalContext.length > 0) {
+        const newContext = config.externalContext.splice(0); // drain
+        for (const ctx of newContext) {
+          this.messages.push({
+            role: "user",
+            content: `[EXTERNAL CONTEXT]\n${ctx}`,
+          } as Record<string, unknown>);
+        }
       }
 
       let response;
@@ -207,6 +249,48 @@ export class AgentLoop {
     });
 
     return { summary, costUsd: this.costUsd, iterations, success };
+  }
+
+  /** Self-reflection: assess progress and decide if approach needs to change. */
+  private async reflect(config: AgentLoopConfig, iteration: number): Promise<string | null> {
+    const recentMessages = this.messages.slice(-6).map((m) => {
+      const role = m.role as string;
+      const content = typeof m.content === "string" ? m.content.slice(0, 200) : JSON.stringify(m.content).slice(0, 200);
+      return `${role}: ${content}`;
+    }).join("\n");
+
+    const reflectionPrompt = `You are reflecting on your progress on this task (iteration ${iteration}).
+
+Original task: ${config.spec}
+
+Your recent actions:
+${recentMessages}
+
+Reflect on:
+1. What have you accomplished so far?
+2. Is your current approach working? Are you making real progress?
+3. What's missing? What could be better?
+4. Should you change your approach? Try a different strategy?
+5. Have you researched enough? Do you need to use web.search for more information?
+6. Are you aiming for excellence, not just "done"?
+
+Be honest and specific. If you're stuck, say so and propose a new approach. If you're on track, confirm and identify what to focus on next.
+
+Respond in 2-4 sentences. Be concise but specific.`;
+
+    try {
+      const response = await this.router.complete({
+        model: config.model,
+        messages: [{ role: "user", content: reflectionPrompt }],
+        system: "You are a self-reflective AI agent. Be honest, specific, and actionable in your reflection.",
+        max_tokens: 512,
+        api_key: config.apiKey,
+      });
+      this.costUsd += response.cost_usd;
+      return response.content;
+    } catch {
+      return null;
+    }
   }
 
   private emit(

@@ -40,6 +40,7 @@ export function Tasks() {
   const [supervisorEnabled, setSupervisorEnabled] = useState(false);
   const [supervisorCount, setSupervisorCount] = useState(1);
   const [supervisorModels, setSupervisorModels] = useState<string[]>([]);
+  const [persistenceMode, setPersistenceMode] = useState<"standard" | "persistent" | "relentless">("standard");
   const [providers, setProviders] = useState<ProviderGroup[]>([]);
   const [hasAnyKey, setHasAnyKey] = useState(false);
   const [error, setError] = useState("");
@@ -98,6 +99,7 @@ export function Tasks() {
           supervisor_enabled: supervisorEnabled && agentCount > 1,
           supervisor_count: supervisorEnabled && agentCount > 1 ? supervisorCount : 0,
           supervisor_models: supervisorEnabled && agentCount > 1 ? supervisorModels.slice(0, supervisorCount) : undefined,
+          persistence_mode: persistenceMode,
         }),
       });
       const data = await resp.json();
@@ -311,6 +313,40 @@ export function Tasks() {
                       Supervisors monitor workers, review their code, and write directives to redirect them if needed.
                       They ensure the final product meets the highest quality standards.
                     </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Persistence mode selector */}
+            {agentCount > 1 && (
+              <div>
+                <label className="muted" style={{ fontSize: "0.75rem", display: "block", marginBottom: "0.25rem" }}>
+                  Persistence Mode
+                </label>
+                <div style={{ display: "flex", gap: "0.4rem" }}>
+                  {([
+                    { val: "standard", label: "Standard", desc: "Run once" },
+                    { val: "persistent", label: "Persistent", desc: "2x iterations, 5 refinement rounds" },
+                    { val: "relentless", label: "Relentless", desc: "3x iterations, 10 refinement rounds" },
+                  ] as const).map((mode) => (
+                    <button
+                      key={mode.val}
+                      type="button"
+                      className={persistenceMode === mode.val ? "btn" : "btn btn-secondary"}
+                      style={{ padding: "0.4rem 0.7rem", fontSize: "0.75rem", flex: 1 }}
+                      onClick={() => setPersistenceMode(mode.val)}
+                      title={mode.desc}
+                    >
+                      {mode.label}
+                    </button>
+                  ))}
+                </div>
+                {persistenceMode !== "standard" && (
+                  <div className="muted" style={{ fontSize: "0.7rem", marginTop: "0.3rem" }}>
+                    {persistenceMode === "relentless"
+                      ? "Relentless: Agents will keep working with 3x iterations and up to 10 refinement rounds. The supervisor will not accept 'good enough' — only 'excellent'."
+                      : "Persistent: Agents get 2x iterations and up to 5 refinement rounds. The supervisor will push for higher quality."}
                   </div>
                 )}
               </div>

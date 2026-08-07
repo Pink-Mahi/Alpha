@@ -631,8 +631,30 @@ function EventRow({ event }: { event: AgentEvent }) {
       );
     }
 
-    case "state.event":
+    case "state.event": {
+      const kind = event.payload.kind as string;
+      if (kind === "self_reflection") {
+        return (
+          <div style={{ marginBottom: "0.5rem", paddingLeft: "0.5rem", borderLeft: "3px solid #a371f7" }}>
+            <div style={{ fontSize: "0.7rem", color: "#a371f7", fontWeight: 600 }}>🧠 Self-Reflection</div>
+            <div style={{ fontSize: "0.75rem", color: "var(--muted)", marginTop: "0.15rem" }}>
+              {event.payload.summary as string}
+            </div>
+          </div>
+        );
+      }
       return null;
+    }
+
+    case "supervisor.directive":
+      return (
+        <div style={{ marginBottom: "0.5rem", paddingLeft: "0.5rem", borderLeft: "3px solid #d29922" }}>
+          <div style={{ fontSize: "0.7rem", color: "#d29922", fontWeight: 600 }}>🔭 Supervisor Directive</div>
+          <div style={{ fontSize: "0.75rem", color: "var(--muted)", marginTop: "0.15rem", whiteSpace: "pre-wrap" }}>
+            {(event.payload as { directive?: string }).directive}
+          </div>
+        </div>
+      );
 
     case "task.complete":
       return (

@@ -1,0 +1,1 @@
+ALTER TABLE "task" ADD COLUMN "persistence_mode" text DEFAULT 'standard' NOT NULL;
