@@ -21,6 +21,9 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
       - run: bun run test
+      # Run per-package tests that use bun:test
+      - run: cd runtimes/local-agent && bun test
+      - run: cd apps/tray-agent && bun test
 
   python:
     name: Python — lint, test

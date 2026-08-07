@@ -16,6 +16,7 @@ import { healthRoutes } from "./routes/health.ts";
 import { marketplaceRoutes } from "./routes/marketplace.ts";
 import { taskRoutes } from "./routes/tasks.ts";
 import { usageRoutes } from "./routes/usage.ts";
+import { rateLimit } from "./middleware/rateLimit.ts";
 
 const app = new Hono();
 
@@ -28,6 +29,11 @@ app.use(
     allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   }),
 );
+
+// Rate limit auth endpoints more aggressively (prevent brute force)
+app.use("/v1/auth/*", rateLimit({ windowMs: 60_000, max: 10 }));
+// General rate limit for all other API endpoints
+app.use("/v1/*", rateLimit({ windowMs: 60_000, max: 100 }));
 
 app.route("/", healthRoutes);
 app.route("/", authRoutes);

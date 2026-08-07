@@ -1,0 +1,442 @@
+# Kubernetes manifests for Cascade production deployment.
+# Apply with: kubectl apply -f infra/k8s/
+#
+# Prerequisites:
+# - EKS cluster with gVisor (runsc) runtime class for cloud-agent sandboxes
+# - PostgreSQL (RDS) + Redis (ElastiCache) provisioned via Terraform
+# - Secrets created: kubectl create secret generic cascade-secrets --from-literal=...
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cascade
+  labels:
+    app.kubernetes.io/part-of: cascade
+---
+# --- Control Plane ---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: control-plane
+  namespace: cascade
+  labels:
+    app: control-plane
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: control-plane
+  template:
+    metadata:
+      labels:
+        app: control-plane
+    spec:
+      containers:
+        - name: control-plane
+          image: ghcr.io/pink-mahi/alpha/control-plane:latest
+          ports:
+            - containerPort: 8080
+          env:
+            - name: PORT
+              value: "8080"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: cascade-secrets
+                  key: database-url
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: cascade-secrets
+                  key: jwt-secret
+            - name: STRIPE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: cascade-secrets
+                  key: stripe-secret-key
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 20
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: control-plane
+  namespace: cascade
+spec:
+  selector:
+    app: control-plane
+  ports:
+    - port: 80
+      targetPort: 8080
+---
+# --- Model Router ---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: model-router
+  namespace: cascade
+  labels:
+    app: model-router
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: model-router
+  template:
+    metadata:
+      labels:
+        app: model-router
+    spec:
+      containers:
+        - name: model-router
+          image: ghcr.io/pink-mahi/alpha/model-router:latest
+          ports:
+            - containerPort: 8081
+          env:
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: cascade-secrets
+                  key: anthropic-api-key
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: cascade-secrets
+                  key: openai-api-key
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+            initialDelaySeconds: 5
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: model-router
+  namespace: cascade
+spec:
+  selector:
+    app: model-router
+  ports:
+    - port: 80
+      targetPort: 8081
+---
+# --- Local Agent Runtime ---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: local-agent
+  namespace: cascade
+  labels:
+    app: local-agent
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: local-agent
+  template:
+    metadata:
+      labels:
+        app: local-agent
+    spec:
+      containers:
+        - name: local-agent
+          image: ghcr.io/pink-mahi/alpha/local-agent:latest
+          ports:
+            - containerPort: 8083
+          env:
+            - name: MODEL_ROUTER_URL
+              value: "http://model-router.cascade.svc.cluster.local"
+          resources:
+            requests:
+              cpu: 500m
+              memory: 512Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8083
+            initialDelaySeconds: 5
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: local-agent
+  namespace: cascade
+spec:
+  selector:
+    app: local-agent
+  ports:
+    - port: 80
+      targetPort: 8083
+---
+# --- Memory Service ---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: memory-service
+  namespace: cascade
+  labels:
+    app: memory-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: memory-service
+  template:
+    metadata:
+      labels:
+        app: memory-service
+    spec:
+      containers:
+        - name: memory-service
+          image: ghcr.io/pink-mahi/alpha/memory-service:latest
+          ports:
+            - containerPort: 8084
+          env:
+            - name: CONTROL_PLANE_URL
+              value: "http://control-plane.cascade.svc.cluster.local"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: memory-service
+  namespace: cascade
+spec:
+  selector:
+    app: memory-service
+  ports:
+    - port: 80
+      targetPort: 8084
+---
+# --- Cloud Agent Runtime (needs gVisor for sandboxes) ---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cloud-agent
+  namespace: cascade
+  labels:
+    app: cloud-agent
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: cloud-agent
+  template:
+    metadata:
+      labels:
+        app: cloud-agent
+    spec:
+      runtimeClassName: gvisor  # Requires runsc on the node
+      containers:
+        - name: cloud-agent
+          image: ghcr.io/pink-mahi/alpha/cloud-agent:latest
+          ports:
+            - containerPort: 8088
+          env:
+            - name: GITHUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: cascade-secrets
+                  key: github-token
+          resources:
+            requests:
+              cpu: 1000m
+              memory: 1Gi
+            limits:
+              cpu: 2000m
+              memory: 2Gi
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8088
+            initialDelaySeconds: 5
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cloud-agent
+  namespace: cascade
+spec:
+  selector:
+    app: cloud-agent
+  ports:
+    - port: 80
+      targetPort: 8088
+---
+# --- Voice Service ---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: voice-service
+  namespace: cascade
+  labels:
+    app: voice-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: voice-service
+  template:
+    metadata:
+      labels:
+        app: voice-service
+    spec:
+      containers:
+        - name: voice-service
+          image: ghcr.io/pink-mahi/alpha/voice-service:latest
+          ports:
+            - containerPort: 8089
+          env:
+            - name: TWILIO_ACCOUNT_SID
+              valueFrom:
+                secretKeyRef:
+                  name: cascade-secrets
+                  key: twilio-account-sid
+            - name: TWILIO_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: cascade-secrets
+                  key: twilio-auth-token
+            - name: TWILIO_CASCADE_NUMBER
+              valueFrom:
+                secretKeyRef:
+                  name: cascade-secrets
+                  key: twilio-cascade-number
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: cascade-secrets
+                  key: openai-api-key
+            - name: VOICE_WEBHOOK_URL
+              value: "https://voice.cascade.dev"
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: voice-service
+  namespace: cascade
+spec:
+  selector:
+    app: voice-service
+  ports:
+    - port: 80
+      targetPort: 8089
+---
+# --- Ingress ---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: cascade-ingress
+  namespace: cascade
+  annotations:
+    kubernetes.io/ingress.class: alb
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+spec:
+  rules:
+    - host: api.cascade.dev
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: control-plane
+                port:
+                  number: 80
+    - host: voice.cascade.dev
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: voice-service
+                port:
+                  number: 80
+---
+# --- HPA for control plane ---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: control-plane
+  namespace: cascade
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: control-plane
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+---
+# --- HPA for local agent ---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: local-agent
+  namespace: cascade
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: local-agent
+  minReplicas: 3
+  maxReplicas: 20
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 65
