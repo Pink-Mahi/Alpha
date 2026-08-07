@@ -145,10 +145,13 @@ app.get("/v1/agent/:id/events", (c) => {
 interface SwarmTask {
   id: string;
   agentIds: string[];
-  agentModels: string[]; // per-agent model
+  agentModels: string[];
+  supervisorIds: string[];
+  supervisorModels: string[];
   status: "coordinating" | "running" | "complete" | "failed";
   subtasks: string[];
-  sharedContext: Map<string, string>; // agentId → latest output (for cross-agent communication)
+  sharedContext: Map<string, string>;
+  supervisorDirectives: Map<string, string[]>; // workerAgentId → directives from supervisors
 }
 const swarms = new Map<string, SwarmTask>();
 
@@ -158,12 +161,15 @@ const swarmSchema = z.object({
   agent_count: z.number().int().min(1).max(5).default(2),
   org_id: z.string().uuid().optional(),
   model: z.string().default("anthropic:claude-3-5-sonnet-latest"),
-  models: z.array(z.string()).optional(), // per-agent models (overrides `model`)
+  models: z.array(z.string()).optional(),
   budget_usd: z.number().default(2.0),
   max_iterations: z.number().default(20),
   api_key: z.string().optional(),
-  api_keys: z.record(z.string()).optional(), // provider → key map for multi-provider swarms
+  api_keys: z.record(z.string()).optional(),
   tool_allowlist: z.array(z.string()).optional(),
+  supervisor_enabled: z.boolean().default(false),
+  supervisor_count: z.number().int().min(0).max(2).default(0),
+  supervisor_models: z.array(z.string()).optional(),
 });
 
 /** POST /v1/agent/swarm — start N agents working on subtasks of the same project. */
@@ -177,9 +183,12 @@ app.post("/v1/agent/swarm", async (c) => {
     id: swarmId,
     agentIds: [],
     agentModels: [],
+    supervisorIds: [],
+    supervisorModels: [],
     status: "coordinating",
     subtasks: [],
     sharedContext: new Map(),
+    supervisorDirectives: new Map(),
   };
   swarms.set(swarmId, swarm);
 
@@ -282,14 +291,146 @@ Original task: ${body.spec}`;
     console.log(`[swarm:${swarmId.slice(0, 8)}] agent ${agentNum} started: ${agentTaskId.slice(0, 8)} (model: ${agentModel})`);
   }
 
+  // Step 3: Start supervisor agents (if enabled)
+  if (body.supervisor_enabled && body.supervisor_count > 0) {
+    const supModels = body.supervisor_models && body.supervisor_models.length >= body.supervisor_count
+      ? body.supervisor_models.slice(0, body.supervisor_count)
+      : Array.from({ length: body.supervisor_count }, () => models[0]!);
+    swarm.supervisorModels = supModels;
+
+    for (let s = 0; s < supModels.length; s++) {
+      const supTaskId = randomUUID();
+      const supModel = supModels[s]!;
+      const supKey = getKeyForModel(supModel);
+      const supNum = s + 1;
+      const supEvents: AgentMessageEnvelope[] = [];
+
+      const supSpec = `You are Supervisor Agent ${supNum}, overseeing ${subtasks.length} worker agents working on a shared project.
+
+Your role:
+1. MONITOR: Watch the worker agents' progress by reading files they create and reviewing their outputs.
+2. DIRECTIVE: When you notice a worker going off-track, producing low-quality code, or missing requirements, write a directive message that will be sent to that worker.
+3. QUALITY: Ensure the final product meets the highest standards. Check for bugs, missing features, and code quality issues.
+4. COORDINATION: If two workers are conflicting (editing the same files), redirect one to a different approach.
+
+Worker agents and their subtasks:
+${subtasks.map((st, i) => `  Agent ${i + 1} (${models[i]}): ${st}`).join("\n")}
+
+Original task: ${body.spec}
+
+You have filesystem tools. Read the files workers are creating. When you want to send a directive to a worker, write it to a file called .supervisor_directive_agentN.txt (where N is the agent number). The system will pick it up and redirect that worker.
+
+Be proactive. Don't wait until the end to review — check in periodically and guide the workers toward the best possible outcome.`;
+
+      const supConfig: AgentLoopConfig = {
+        orgId: body.org_id ?? "00000000-0000-0000-0000-000000000000",
+        runId: randomUUID(),
+        taskId: supTaskId,
+        spec: supSpec,
+        cwd: body.cwd,
+        budgetUsd: budgetPerAgent * 0.5, // supervisors get half budget
+        maxIterations: Math.max(3, maxIterPerAgent / 2),
+        model: supModel,
+        toolAllowList: body.tool_allowlist,
+        permissions: new Set([
+          "fs.read", "fs.write", "fs.list",
+          "shell.exec", "git.read", "git.write",
+          "search.grep", "search.files",
+        ]),
+        onEvent: (env) => supEvents.push(env),
+        requestApproval: async () => true,
+        apiKey: supKey,
+      };
+
+      const supTask: RunningTask = { id: supTaskId, config: supConfig, events: supEvents, status: "running", abort: new AbortController() };
+      tasks.set(supTaskId, supTask);
+      swarm.supervisorIds.push(supTaskId);
+
+      const supLoop = new AgentLoop(bus, router);
+      supLoop.run(supConfig).then((result) => {
+        supTask.result = result;
+        supTask.status = result.success ? "complete" : "failed";
+      }).catch((e) => {
+        supTask.status = "failed";
+        supTask.result = { summary: String(e), costUsd: 0, iterations: 0, success: false };
+      });
+
+      console.log(`[swarm:${swarmId.slice(0, 8)}] supervisor ${supNum} started: ${supTaskId.slice(0, 8)} (model: ${supModel})`);
+    }
+
+    // Start the supervisor orchestration loop — polls worker progress and applies directives
+    runSupervisorLoop(swarm, body.cwd);
+  }
+
   return c.json({
     swarm_id: swarmId,
     agent_ids: swarm.agentIds,
     agent_models: models,
+    supervisor_ids: swarm.supervisorIds,
+    supervisor_models: swarm.supervisorModels,
     subtasks,
     status: "running",
   }, 201);
 });
+
+/** Supervisor orchestration loop — monitors workers and applies directives. */
+async function runSupervisorLoop(swarm: SwarmTask, cwd: string) {
+  const { readFileSync, unlinkSync, existsSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const checkInterval = 5000; // check every 5 seconds
+  let checkCount = 0;
+  const maxChecks = 60; // max 5 minutes of supervision
+
+  while (checkCount < maxChecks) {
+    await new Promise((r) => setTimeout(r, checkInterval));
+    checkCount++;
+
+    // Check if all workers are done
+    const allWorkersDone = swarm.agentIds.every((aid) => {
+      const t = tasks.get(aid);
+      return t && (t.status === "complete" || t.status === "failed" || t.status === "killed");
+    });
+
+    // Check for directive files from supervisors
+    for (let i = 0; i < swarm.agentIds.length; i++) {
+      const agentNum = i + 1;
+      const directiveFile = join(cwd, `.supervisor_directive_agent${agentNum}.txt`);
+      if (existsSync(directiveFile)) {
+        try {
+          const directive = readFileSync(directiveFile, "utf8").trim();
+          if (directive) {
+            console.log(`[swarm:${swarm.id.slice(0, 8)}] supervisor directive for agent ${agentNum}: ${directive.slice(0, 100)}...`);
+            // Store the directive
+            if (!swarm.supervisorDirectives.has(swarm.agentIds[i]!)) {
+              swarm.supervisorDirectives.set(swarm.agentIds[i]!, []);
+            }
+            swarm.supervisorDirectives.get(swarm.agentIds[i]!)!.push(directive);
+            // Emit a directive event to the worker's event stream
+            const workerTask = tasks.get(swarm.agentIds[i]!);
+            if (workerTask && workerTask.status === "running") {
+              workerTask.events.push({
+                version: "1.0",
+                org_id: workerTask.config.orgId,
+                run_id: workerTask.config.runId,
+                task_id: workerTask.config.taskId,
+                seq: workerTask.events.length,
+                ts: new Date().toISOString(),
+                type: "supervisor.directive",
+                payload: { directive, from: "supervisor" },
+              } as unknown as AgentMessageEnvelope);
+            }
+          }
+          unlinkSync(directiveFile);
+        } catch { /* ignore file errors */ }
+      }
+    }
+
+    if (allWorkersDone) {
+      console.log(`[swarm:${swarm.id.slice(0, 8)}] all workers done, supervisor loop ending`);
+      break;
+    }
+  }
+}
 
 /** GET /v1/agent/swarm/:id — get swarm status (all agents). */
 app.get("/v1/agent/swarm/:id", (c) => {
@@ -299,13 +440,27 @@ app.get("/v1/agent/swarm/:id", (c) => {
     const t = tasks.get(aid);
     return {
       id: aid,
+      role: "worker" as const,
       status: t?.status ?? "unknown",
       model: swarm.agentModels[i] ?? "unknown",
       events: t?.events.slice(-30) ?? [],
       result: t?.result,
+      directives: swarm.supervisorDirectives.get(aid) ?? [],
     };
   });
-  const allDone = agents.every((a) => a.status === "complete" || a.status === "failed" || a.status === "killed");
+  const supervisors = swarm.supervisorIds.map((sid, i) => {
+    const t = tasks.get(sid);
+    return {
+      id: sid,
+      role: "supervisor" as const,
+      status: t?.status ?? "unknown",
+      model: swarm.supervisorModels[i] ?? "unknown",
+      events: t?.events.slice(-30) ?? [],
+      result: t?.result,
+    };
+  });
+  const allAgents = [...agents, ...supervisors];
+  const allDone = allAgents.every((a) => a.status === "complete" || a.status === "failed" || a.status === "killed");
   const sharedContext = Object.fromEntries(swarm.sharedContext);
   return c.json({
     id: swarm.id,
@@ -313,6 +468,7 @@ app.get("/v1/agent/swarm/:id", (c) => {
     subtasks: swarm.subtasks,
     agent_models: swarm.agentModels,
     agents,
+    supervisors,
     shared_context: sharedContext,
   });
 });

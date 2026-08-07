@@ -21,7 +21,10 @@ const createSchema = z.object({
   repo_ref: z.string().optional(),
   model: z.string().optional(),
   agent_count: z.number().int().min(1).max(5).default(1),
-  agent_models: z.array(z.string()).optional(), // per-agent models for swarm
+  agent_models: z.array(z.string()).optional(),
+  supervisor_enabled: z.boolean().default(false),
+  supervisor_count: z.number().int().min(0).max(2).default(0),
+  supervisor_models: z.array(z.string()).optional(),
 });
 
 taskRoutes.use("*", authMiddleware());
@@ -46,6 +49,9 @@ taskRoutes.post("/v1/tasks", async (c) => {
       model: body.model,
       agent_count: body.agent_count,
       agent_models: body.agent_models ? JSON.stringify(body.agent_models) : null,
+      supervisor_enabled: body.supervisor_enabled,
+      supervisor_count: body.supervisor_count,
+      supervisor_models: body.supervisor_models ? JSON.stringify(body.supervisor_models) : null,
     })
     .returning();
   return c.json({ task: t[0] }, 201);
@@ -129,6 +135,8 @@ taskRoutes.post("/v1/tasks/:id/start", async (c) => {
     // Parse per-agent models if stored
     let agentModels: string[] | undefined;
     try { agentModels = t.agent_models ? JSON.parse(t.agent_models) as string[] : undefined; } catch { /* ignore */ }
+    let supervisorModels: string[] | undefined;
+    try { supervisorModels = t.supervisor_models ? JSON.parse(t.supervisor_models) as string[] : undefined; } catch { /* ignore */ }
 
     // Build api_keys map for all providers that have BYO keys
     const apiKeysMap: Record<string, string> = {};
@@ -148,6 +156,9 @@ taskRoutes.post("/v1/tasks/:id/start", async (c) => {
       max_iterations: 20,
       api_key: apiKey,
       api_keys: apiKeysMap,
+      supervisor_enabled: t.supervisor_enabled ?? false,
+      supervisor_count: t.supervisor_count ?? 0,
+      supervisor_models: supervisorModels,
     };
 
     let swarmResp: Response;

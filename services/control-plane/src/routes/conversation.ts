@@ -116,6 +116,8 @@ conversationRoutes.post("/v1/tasks/:id/messages", async (c) => {
     // Parse per-agent models if stored
     let agentModels: string[] | undefined;
     try { agentModels = t.agent_models ? JSON.parse(t.agent_models) as string[] : undefined; } catch { /* ignore */ }
+    let supervisorModels: string[] | undefined;
+    try { supervisorModels = t.supervisor_models ? JSON.parse(t.supervisor_models) as string[] : undefined; } catch { /* ignore */ }
 
     // Build api_keys map for all providers
     const apiKeysMap: Record<string, string> = {};
@@ -135,6 +137,9 @@ conversationRoutes.post("/v1/tasks/:id/messages", async (c) => {
       max_iterations: 20,
       api_key: apiKey,
       api_keys: apiKeysMap,
+      supervisor_enabled: t.supervisor_enabled ?? false,
+      supervisor_count: t.supervisor_count ?? 0,
+      supervisor_models: supervisorModels,
     };
 
     let swarmResp: Response;

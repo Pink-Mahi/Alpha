@@ -87,6 +87,9 @@ export const task = pgTable("task", {
   model: text("model"), // e.g. "anthropic:claude-3-5-sonnet-latest" — null = auto-pick
   agent_count: integer("agent_count").notNull().default(1), // 1-5 agents for swarm mode
   agent_models: text("agent_models"), // JSON array of per-agent models for multi-provider swarms
+  supervisor_enabled: boolean("supervisor_enabled").notNull().default(false), // enable supervisor agents
+  supervisor_count: integer("supervisor_count").notNull().default(0), // 0-2 supervisor agents
+  supervisor_models: text("supervisor_models"), // JSON array of supervisor models
   created_at: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

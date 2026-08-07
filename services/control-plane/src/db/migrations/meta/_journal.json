@@ -36,6 +36,13 @@
       "when": 1786135000534,
       "tag": "0004_absent_maelstrom",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1786135471402,
+      "tag": "0005_silent_magik",
+      "breakpoints": true
     }
   ]
 }

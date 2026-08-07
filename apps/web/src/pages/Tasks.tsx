@@ -37,6 +37,9 @@ export function Tasks() {
   const [selectedModel, setSelectedModel] = useState("");
   const [agentCount, setAgentCount] = useState(1);
   const [agentModels, setAgentModels] = useState<string[]>([]);
+  const [supervisorEnabled, setSupervisorEnabled] = useState(false);
+  const [supervisorCount, setSupervisorCount] = useState(1);
+  const [supervisorModels, setSupervisorModels] = useState<string[]>([]);
   const [providers, setProviders] = useState<ProviderGroup[]>([]);
   const [hasAnyKey, setHasAnyKey] = useState(false);
   const [error, setError] = useState("");
@@ -92,6 +95,9 @@ export function Tasks() {
           model: selectedModel || undefined,
           agent_count: agentCount,
           agent_models: agentCount > 1 ? agentModels.slice(0, agentCount) : undefined,
+          supervisor_enabled: supervisorEnabled && agentCount > 1,
+          supervisor_count: supervisorEnabled && agentCount > 1 ? supervisorCount : 0,
+          supervisor_models: supervisorEnabled && agentCount > 1 ? supervisorModels.slice(0, supervisorCount) : undefined,
         }),
       });
       const data = await resp.json();
@@ -230,6 +236,86 @@ export function Tasks() {
                 ))}
               </div>
             )}
+
+            {/* Supervisor agents (only in swarm mode) */}
+            {agentCount > 1 && (
+              <div>
+                <label style={{ fontSize: "0.8125rem", display: "flex", alignItems: "center", gap: "0.5rem", cursor: "pointer" }}>
+                  <input
+                    type="checkbox"
+                    checked={supervisorEnabled}
+                    onChange={(e) => {
+                      setSupervisorEnabled(e.target.checked);
+                      if (e.target.checked && supervisorModels.length === 0) {
+                        setSupervisorModels([selectedModel || (availableModels()[0]?.id ?? "")]);
+                      }
+                    }}
+                  />
+                  <span style={{ fontWeight: 600 }}>Supervisor Agents</span>
+                  <span className="muted" style={{ fontSize: "0.7rem" }}>
+                    — oversee workers, redirect them, and ensure quality
+                  </span>
+                </label>
+
+                {supervisorEnabled && (
+                  <div style={{ marginTop: "0.5rem", padding: "0.75rem", background: "rgba(31, 111, 235, 0.05)", borderRadius: "var(--radius)", border: "1px solid var(--border)" }}>
+                    <div style={{ marginBottom: "0.5rem" }}>
+                      <label className="muted" style={{ fontSize: "0.7rem", display: "block", marginBottom: "0.25rem" }}>Number of supervisors</label>
+                      <div style={{ display: "flex", gap: "0.4rem" }}>
+                        {[1, 2].map((n) => (
+                          <button
+                            key={n}
+                            type="button"
+                            className={supervisorCount === n ? "btn" : "btn btn-secondary"}
+                            style={{ width: "2.5rem", padding: "0.3rem", fontSize: "0.8125rem" }}
+                            onClick={() => {
+                              setSupervisorCount(n);
+                              setSupervisorModels((prev) => {
+                                const next = [...prev];
+                                while (next.length < n) next.push(selectedModel || (availableModels()[0]?.id ?? ""));
+                                return next.slice(0, n);
+                              });
+                            }}
+                          >{n}</button>
+                        ))}
+                      </div>
+                    </div>
+                    {Array.from({ length: supervisorCount }, (_, i) => (
+                      <div key={i} style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.4rem" }}>
+                        <span style={{ fontSize: "0.7rem", fontWeight: 600, width: "6rem", flexShrink: 0, color: "#1f6feb" }}>Supervisor {i + 1}</span>
+                        <select
+                          value={supervisorModels[i] ?? selectedModel}
+                          onChange={(e) => {
+                            setSupervisorModels((prev) => {
+                              const next = [...prev];
+                              while (next.length <= i) next.push("");
+                              next[i] = e.target.value;
+                              return next;
+                            });
+                          }}
+                          style={{ fontSize: "0.8125rem" }}
+                        >
+                          {providers.filter((p) => p.has_key).map((pg) => (
+                            <optgroup key={pg.provider} label={pg.provider.charAt(0).toUpperCase() + pg.provider.slice(1)}>
+                              {pg.models.map((m) => (
+                                <option key={m.id} value={m.id}>
+                                  {m.name} {m.tags.includes("recommended") ? "⭐" : ""}
+                                </option>
+                              ))}
+                            </optgroup>
+                          ))}
+                        </select>
+                      </div>
+                    ))}
+                    <div className="muted" style={{ fontSize: "0.7rem", marginTop: "0.5rem" }}>
+                      Supervisors monitor workers, review their code, and write directives to redirect them if needed.
+                      They ensure the final product meets the highest quality standards.
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             <button type="submit" className="btn" disabled={creating || !hasAnyKey}>
               {creating ? "Creating..." : "Create & Start Chatting"}
             </button>

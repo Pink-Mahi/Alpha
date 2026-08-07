@@ -66,7 +66,8 @@ export function TaskDetail() {
   const [agentTaskId, setAgentTaskId] = useState<string | null>(null);
   // Swarm state
   const [swarmId, setSwarmId] = useState<string | null>(null);
-  const [swarmAgents, setSwarmAgents] = useState<Array<{ id: string; status: string; model?: string; events: AgentEvent[]; result?: { summary: string; costUsd: number; iterations: number; success: boolean } }>>([]);
+  const [swarmAgents, setSwarmAgents] = useState<Array<{ id: string; status: string; model?: string; events: AgentEvent[]; result?: { summary: string; costUsd: number; iterations: number; success: boolean }; directives?: string[] }>>([]);
+  const [swarmSupervisors, setSwarmSupervisors] = useState<Array<{ id: string; status: string; model?: string; events: AgentEvent[]; result?: { summary: string; costUsd: number; iterations: number; success: boolean } }>>([]);
   const [swarmSubtasks, setSwarmSubtasks] = useState<string[]>([]);
   const [activeAgentTab, setActiveAgentTab] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -148,8 +149,14 @@ export function TaskDetail() {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (resp.ok) {
-          const data = await resp.json() as { status: string; subtasks: string[]; agents: Array<{ id: string; status: string; events: AgentEvent[]; result?: { summary: string; costUsd: number; iterations: number; success: boolean } }> };
-          setSwarmAgents(data.agents);
+          const data = await resp.json() as {
+            status: string;
+            subtasks: string[];
+            agents: Array<{ id: string; status: string; model?: string; events: AgentEvent[]; result?: { summary: string; costUsd: number; iterations: number; success: boolean }; directives?: string[] }>;
+            supervisors?: Array<{ id: string; status: string; model?: string; events: AgentEvent[]; result?: { summary: string; costUsd: number; iterations: number; success: boolean } }>;
+          };
+          setSwarmAgents(data.agents ?? []);
+          setSwarmSupervisors(data.supervisors ?? []);
           setSwarmSubtasks(data.subtasks ?? []);
           if (data.status === "complete") {
             if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
@@ -389,12 +396,52 @@ export function TaskDetail() {
             <div style={{ marginBottom: "1rem" }}>
               <div style={{ fontSize: "0.75rem", color: "#1f6feb", marginBottom: "0.5rem", display: "flex", alignItems: "center", gap: "0.5rem" }}>
                 ● Swarm of {swarmAgents.length} agents working
+                {swarmSupervisors.length > 0 && (
+                  <span style={{ color: "#d29922" }}>
+                    + {swarmSupervisors.length} supervisor{swarmSupervisors.length > 1 ? "s" : ""}
+                  </span>
+                )}
                 {swarmAgents.filter((a) => a.status === "complete").length > 0 && (
                   <span style={{ color: "#238636" }}>
-                    ({swarmAgents.filter((a) => a.status === "complete").length} done)
+                    ({swarmAgents.filter((a) => a.status === "complete").length} workers done)
                   </span>
                 )}
               </div>
+
+              {/* Supervisor agents section */}
+              {swarmSupervisors.length > 0 && (
+                <div style={{ marginBottom: "0.5rem", padding: "0.5rem 0.6rem", background: "rgba(210, 153, 34, 0.08)", borderRadius: "var(--radius)", border: "1px solid rgba(210, 153, 34, 0.2)" }}>
+                  <div style={{ fontSize: "0.7rem", fontWeight: 600, color: "#d29922", marginBottom: "0.3rem" }}>
+                    🔭 Supervisor Agents
+                  </div>
+                  <div style={{ display: "flex", gap: "0.25rem", flexWrap: "wrap" }}>
+                    {swarmSupervisors.map((sup, i) => (
+                      <span key={sup.id} style={{
+                        padding: "0.2rem 0.5rem",
+                        borderRadius: "var(--radius)",
+                        fontSize: "0.65rem",
+                        background: sup.status === "complete" ? "rgba(35, 134, 54, 0.15)" : sup.status === "running" ? "rgba(31, 111, 235, 0.15)" : "var(--bg)",
+                        border: `1px solid ${sup.status === "complete" ? "#238636" : sup.status === "running" ? "#1f6feb" : "var(--border)"}`,
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "0.3rem",
+                      }}>
+                        <span style={{
+                          width: "0.4rem", height: "0.4rem", borderRadius: "50%",
+                          background: sup.status === "complete" ? "#238636" : sup.status === "running" ? "#1f6feb" : sup.status === "failed" ? "#f85149" : "var(--muted)",
+                        }} />
+                        Supervisor {i + 1} ({sup.model?.split(":")[1]?.split("/").pop() ?? sup.model})
+                      </span>
+                    ))}
+                  </div>
+                  {/* Show latest supervisor events */}
+                  {swarmSupervisors.map((sup) => sup.events.filter((e) => e.type === "tool.call" || e.type === "task.complete").slice(-2).map((e, i) => (
+                    <div key={`${sup.id}-${i}`} style={{ fontSize: "0.65rem", color: "var(--muted)", marginTop: "0.2rem" }}>
+                      {e.type === "tool.call" ? `🔧 ${e.payload.tool}` : "✓ Review complete"}
+                    </div>
+                  )))}
+                </div>
+              )}
 
               {/* Agent tabs */}
               <div style={{ display: "flex", gap: "0.25rem", marginBottom: "0.5rem", flexWrap: "wrap" }}>
@@ -433,6 +480,16 @@ export function TaskDetail() {
               {swarmSubtasks[activeAgentTab] && (
                 <div style={{ fontSize: "0.75rem", padding: "0.4rem 0.6rem", background: "var(--bg)", borderRadius: "var(--radius)", marginBottom: "0.5rem", borderLeft: "3px solid #1f6feb" }}>
                   <strong>Subtask:</strong> {swarmSubtasks[activeAgentTab]}
+                </div>
+              )}
+
+              {/* Supervisor directives for active agent */}
+              {swarmAgents[activeAgentTab]?.directives && swarmAgents[activeAgentTab].directives!.length > 0 && (
+                <div style={{ fontSize: "0.75rem", padding: "0.4rem 0.6rem", background: "rgba(210, 153, 34, 0.1)", borderRadius: "var(--radius)", marginBottom: "0.5rem", borderLeft: "3px solid #d29922" }}>
+                  <strong style={{ color: "#d29922" }}>🔭 Supervisor directive:</strong>
+                  <div style={{ marginTop: "0.25rem", whiteSpace: "pre-wrap" }}>
+                    {swarmAgents[activeAgentTab].directives![swarmAgents[activeAgentTab].directives!.length - 1]}
+                  </div>
                 </div>
               )}
 
