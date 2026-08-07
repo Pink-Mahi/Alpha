@@ -98,6 +98,7 @@ app.post("/v1/agent/start", async (c) => {
       "git.branch", "git.checkout", "git.log", "git.merge", "git.stash",
       "docker.build", "docker.run", "docker.compose",
       "code.analyze", "security.scan", "docs.generate", "project.scaffold", "data.transform", "pkg.install",
+      "math.solve", "math.calculate", "physics.solve", "chemistry.solve", "science.constant",
     ]),
     onEvent: (env) => events.push(env),
     requestApproval: async (tool, args, reason) => {
@@ -286,6 +287,7 @@ Original task: ${body.spec}`;
       "git.branch", "git.checkout", "git.log", "git.merge", "git.stash",
       "docker.build", "docker.run", "docker.compose",
       "code.analyze", "security.scan", "docs.generate", "project.scaffold", "data.transform", "pkg.install",
+      "math.solve", "math.calculate", "physics.solve", "chemistry.solve", "science.constant",
       ]),
       reflectionInterval: 5,
       externalContext: [],
@@ -395,6 +397,7 @@ The user is your boss. Their feedback overrides any default assumptions you have
       "git.branch", "git.checkout", "git.log", "git.merge", "git.stash",
       "docker.build", "docker.run", "docker.compose",
       "code.analyze", "security.scan", "docs.generate", "project.scaffold", "data.transform", "pkg.install",
+      "math.solve", "math.calculate", "physics.solve", "chemistry.solve", "science.constant",
         ]),
         reflectionInterval: 3,
         onEvent: (env) => supEvents.push(env),

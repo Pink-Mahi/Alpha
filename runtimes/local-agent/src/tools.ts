@@ -21,6 +21,7 @@ import {
   dockerBuild, dockerRun, dockerCompose,
   codeAnalyze, securityScan, docsGenerate, projectScaffold, dataTransform, pkgInstall,
 } from "./tier3Tools.js";
+import { mathSolve, mathCalculate, physicsSolve, chemistrySolve, scienceConstant } from "./scienceTools.js";
 import type { ModelRouterClient } from "./modelRouterClient.js";
 
 import type { ToolDef, ToolContext } from "./toolBus.js";
@@ -445,4 +446,10 @@ export function registerBuiltinTools(bus: import("./toolBus.js").ToolBus, router
   bus.register(projectScaffold);
   bus.register(dataTransform);
   bus.register(pkgInstall);
+  // Science tools — math, physics, chemistry
+  bus.register(mathSolve);
+  bus.register(mathCalculate);
+  bus.register(physicsSolve);
+  bus.register(chemistrySolve);
+  bus.register(scienceConstant);
 }

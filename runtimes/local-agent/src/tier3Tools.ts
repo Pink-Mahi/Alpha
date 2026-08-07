@@ -1,5 +1,5 @@
-﻿/**
- * Tier 3 tools â€” advanced git, Docker, code analysis, security scanning,
+﻿﻿/**
+ * Tier 3 tools -- advanced git, Docker, code analysis, security scanning,
  * documentation generation, project scaffolding, and data transformation.
  *
  * These tools give the agent professional-grade DevOps and code quality
@@ -23,12 +23,12 @@ function safePath(cwd: string, path: string): string {
 }
 
 // =============================================================================
-// 1. ADVANCED GIT TOOLS â€” branch, checkout, log, merge, stash
+// 1. ADVANCED GIT TOOLS -- branch, checkout, log, merge, stash
 // =============================================================================
 
 export const gitBranch: ToolDef = {
   name: "git.branch",
-  description: "Create, list, or delete git branches. Use this to manage feature branches, create release branches, or clean up old branches. Creating a branch does not switch to it â€” use git.checkout for that.",
+  description: "Create, list, or delete git branches. Use this to manage feature branches, create release branches, or clean up old branches. Creating a branch does not switch to it -- use git.checkout for that.",
   inputSchema: z.object({
     action: z.enum(["create", "list", "delete"]).describe("Action to perform"),
     name: z.string().optional().describe("Branch name (required for create/delete)"),
@@ -200,7 +200,7 @@ export const gitStash: ToolDef = {
 };
 
 // =============================================================================
-// 2. DOCKER TOOLS â€” build, run, manage containers
+// 2. DOCKER TOOLS -- build, run, manage containers
 // =============================================================================
 
 export const dockerBuild: ToolDef = {
@@ -324,7 +324,7 @@ export const dockerCompose: ToolDef = {
 };
 
 // =============================================================================
-// 3. CODE ANALYSIS â€” complexity, quality, dependency analysis
+// 3. CODE ANALYSIS -- complexity, quality, dependency analysis
 // =============================================================================
 
 export const codeAnalyze: ToolDef = {
@@ -555,7 +555,7 @@ export const codeAnalyze: ToolDef = {
 };
 
 // =============================================================================
-// 4. SECURITY SCAN â€” vulnerability scanning
+// 4. SECURITY SCAN -- vulnerability scanning
 // =============================================================================
 
 export const securityScan: ToolDef = {
@@ -601,13 +601,13 @@ export const securityScan: ToolDef = {
       { regex: /sk-[a-zA-Z0-9]{20,}/, type: "openai_key", severity: "critical", message: "OpenAI API key detected", recommendation: "Rotate this key and move it to an environment variable." },
       { regex: /ghp_[a-zA-Z0-9]{36}/, type: "github_token", severity: "critical", message: "GitHub Personal Access Token detected", recommendation: "Revoke this token and use GitHub Actions secrets or environment variables." },
       // SQL injection
-      { regex: /(?:query|execute|exec)\s*\(\s*["'].*\$\{.*\}.*["']\s*\)/i, type: "sql_injection", severity: "high", message: "Potential SQL injection â€” string interpolation in query", recommendation: "Use parameterized queries or prepared statements instead of string interpolation." },
-      { regex: /(?:query|execute|exec)\s*\(\s*["'].*\+.*["']\s*\)/i, type: "sql_injection", severity: "high", message: "Potential SQL injection â€” string concatenation in query", recommendation: "Use parameterized queries instead of string concatenation." },
+      { regex: /(?:query|execute|exec)\s*\(\s*["'].*\$\{.*\}.*["']\s*\)/i, type: "sql_injection", severity: "high", message: "Potential SQL injection -- string interpolation in query", recommendation: "Use parameterized queries or prepared statements instead of string interpolation." },
+      { regex: /(?:query|execute|exec)\s*\(\s*["'].*\+.*["']\s*\)/i, type: "sql_injection", severity: "high", message: "Potential SQL injection -- string concatenation in query", recommendation: "Use parameterized queries instead of string concatenation." },
       // XSS
-      { regex: /innerHTML\s*=\s*[^"']/i, type: "xss", severity: "high", message: "Potential XSS â€” direct innerHTML assignment", recommendation: "Use textContent or sanitize HTML before assignment." },
+      { regex: /innerHTML\s*=\s*[^"']/i, type: "xss", severity: "high", message: "Potential XSS -- direct innerHTML assignment", recommendation: "Use textContent or sanitize HTML before assignment." },
       { regex: /dangerouslySetInnerHTML/i, type: "xss", severity: "medium", message: "React dangerouslySetInnerHTML used", recommendation: "Ensure the HTML is sanitized with DOMPurify before using dangerouslySetInnerHTML." },
       // Eval
-      { regex: /\beval\s*\(/i, type: "eval", severity: "high", message: "Use of eval() detected", recommendation: "Avoid eval() â€” it allows arbitrary code execution. Use JSON.parse() or Function() with caution." },
+      { regex: /\beval\s*\(/i, type: "eval", severity: "high", message: "Use of eval() detected", recommendation: "Avoid eval() -- it allows arbitrary code execution. Use JSON.parse() or Function() with caution." },
       // Insecure HTTP
       { regex: /http:\/\/(?!localhost|127\.0\.0\.1)/i, type: "insecure_http", severity: "medium", message: "Insecure HTTP URL detected", recommendation: "Use HTTPS for all external URLs." },
       // Disabled security
@@ -697,7 +697,7 @@ export const securityScan: ToolDef = {
 };
 
 // =============================================================================
-// 5. DOCUMENTATION GENERATION â€” generate docs from code
+// 5. DOCUMENTATION GENERATION -- generate docs from code
 // =============================================================================
 
 export const docsGenerate: ToolDef = {
@@ -869,7 +869,7 @@ ${docContent.replace(/^# (.+)$/gm, "<h1>$1</h1>").replace(/^## (.+)$/gm, "<h2>$1
 };
 
 // =============================================================================
-// 6. PROJECT SCAFFOLDING â€” create new projects from templates
+// 6. PROJECT SCAFFOLDING -- create new projects from templates
 // =============================================================================
 
 export const projectScaffold: ToolDef = {
@@ -1023,7 +1023,7 @@ export const projectScaffold: ToolDef = {
 };
 
 // =============================================================================
-// 7. DATA TRANSFORM â€” CSV/JSON data processing
+// 7. DATA TRANSFORM -- CSV/JSON data processing
 // =============================================================================
 
 export const dataTransform: ToolDef = {
@@ -1187,7 +1187,7 @@ export const dataTransform: ToolDef = {
 };
 
 // =============================================================================
-// 8. PACKAGE MANAGER â€” install, update, search packages
+// 8. PACKAGE MANAGER -- install, update, search packages
 // =============================================================================
 
 export const pkgInstall: ToolDef = {
