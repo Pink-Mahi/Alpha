@@ -145,8 +145,10 @@ app.get("/v1/agent/:id/events", (c) => {
 interface SwarmTask {
   id: string;
   agentIds: string[];
+  agentModels: string[]; // per-agent model
   status: "coordinating" | "running" | "complete" | "failed";
   subtasks: string[];
+  sharedContext: Map<string, string>; // agentId → latest output (for cross-agent communication)
 }
 const swarms = new Map<string, SwarmTask>();
 
@@ -156,9 +158,11 @@ const swarmSchema = z.object({
   agent_count: z.number().int().min(1).max(5).default(2),
   org_id: z.string().uuid().optional(),
   model: z.string().default("anthropic:claude-3-5-sonnet-latest"),
+  models: z.array(z.string()).optional(), // per-agent models (overrides `model`)
   budget_usd: z.number().default(2.0),
   max_iterations: z.number().default(20),
   api_key: z.string().optional(),
+  api_keys: z.record(z.string()).optional(), // provider → key map for multi-provider swarms
   tool_allowlist: z.array(z.string()).optional(),
 });
 
@@ -169,21 +173,40 @@ app.post("/v1/agent/swarm", async (c) => {
   const body = parsed.data;
 
   const swarmId = randomUUID();
-  const swarm: SwarmTask = { id: swarmId, agentIds: [], status: "coordinating", subtasks: [] };
+  const swarm: SwarmTask = {
+    id: swarmId,
+    agentIds: [],
+    agentModels: [],
+    status: "coordinating",
+    subtasks: [],
+    sharedContext: new Map(),
+  };
   swarms.set(swarmId, swarm);
 
-  // Step 1: Use the LLM to break down the task into N subtasks
+  // Determine per-agent models
+  const models = body.models && body.models.length >= body.agent_count
+    ? body.models.slice(0, body.agent_count)
+    : Array.from({ length: body.agent_count }, () => body.model);
+
+  // Helper to get the right API key for a model
+  function getKeyForModel(model: string): string | undefined {
+    if (!body.api_keys) return body.api_key;
+    const provider = model.split(":")[0]!;
+    return body.api_keys[provider] ?? body.api_key;
+  }
+
+  // Step 1: Use the LLM to break down the task into N subtasks (use first agent's model)
   let subtasks: string[];
   try {
-    subtasks = await decomposeTask(body.spec, body.agent_count, body.model, body.api_key);
+    subtasks = await decomposeTask(body.spec, body.agent_count, models[0]!, getKeyForModel(models[0]!));
   } catch (e) {
-    // Fallback: just split the spec into N identical copies
     console.log(`[swarm:${swarmId.slice(0, 8)}] decomposition failed: ${e}, using fallback`);
     subtasks = Array.from({ length: body.agent_count }, (_, i) =>
       `${body.spec}\n\nYou are agent ${i + 1} of ${body.agent_count}. Focus on a different aspect of this task.`
     );
   }
   swarm.subtasks = subtasks;
+  swarm.agentModels = models;
 
   // Step 2: Start N agent loops in parallel
   swarm.status = "running";
@@ -194,25 +217,51 @@ app.post("/v1/agent/swarm", async (c) => {
     const agentTaskId = randomUUID();
     const runId = randomUUID();
     const events: AgentMessageEnvelope[] = [];
+    const agentModel = models[i]!;
+    const agentKey = getKeyForModel(agentModel);
+    const agentNum = i + 1;
+
+    // Build spec with cross-agent awareness
+    const otherModels = models.map((m, idx) => idx !== i ? `Agent ${idx + 1} (${m})` : null).filter(Boolean).join(", ");
+    const spec = `You are Agent ${agentNum} of ${subtasks.length} working on a shared project.
+You are powered by ${agentModel}. Other agents in this swarm: ${otherModels}.
+
+Your assigned subtask: ${subtasks[i]}
+
+IMPORTANT:
+- The project directory is shared with other agents. Only modify files relevant to your subtask to avoid conflicts.
+- You can see other agents' latest outputs in the shared context below. Learn from their approaches and build on their insights.
+- If you notice issues in other agents' work, you may fix them, but note what you changed and why.
+
+Original task: ${body.spec}`;
 
     const config: AgentLoopConfig = {
       orgId: body.org_id ?? "00000000-0000-0000-0000-000000000000",
       runId,
       taskId: agentTaskId,
-      spec: `You are Agent ${i + 1} of ${subtasks.length} working on a shared project.\n\nYour assigned subtask: ${subtasks[i]}\n\nThe project directory is shared with other agents. Only modify files relevant to your subtask to avoid conflicts.\n\nOriginal task: ${body.spec}`,
+      spec,
       cwd: body.cwd,
       budgetUsd: budgetPerAgent,
       maxIterations: maxIterPerAgent,
-      model: body.model,
+      model: agentModel,
       toolAllowList: body.tool_allowlist,
       permissions: new Set([
         "fs.read", "fs.write", "fs.list",
         "shell.exec", "git.read", "git.write",
         "search.grep", "search.files",
       ]),
-      onEvent: (env) => events.push(env),
+      onEvent: (env) => {
+        events.push(env);
+        // Capture assistant responses for cross-agent sharing
+        if (env.type === "task.complete") {
+          const summary = (env.payload as { summary?: string }).summary;
+          if (summary) {
+            swarm.sharedContext.set(agentTaskId, `[Agent ${agentNum} (${agentModel})]: ${summary}`);
+          }
+        }
+      },
       requestApproval: async () => true,
-      apiKey: body.api_key,
+      apiKey: agentKey,
     };
 
     const task: RunningTask = { id: agentTaskId, config, events, status: "running", abort: new AbortController() };
@@ -223,36 +272,48 @@ app.post("/v1/agent/swarm", async (c) => {
     loop.run(config).then((result) => {
       task.result = result;
       task.status = result.success ? "complete" : "failed";
+      // Share the result with other agents
+      swarm.sharedContext.set(agentTaskId, `[Agent ${agentNum} (${agentModel})]: ${result.summary}`);
     }).catch((e) => {
       task.status = "failed";
       task.result = { summary: String(e), costUsd: 0, iterations: 0, success: false };
     });
 
-    console.log(`[swarm:${swarmId.slice(0, 8)}] agent ${i + 1} started: ${agentTaskId.slice(0, 8)}`);
+    console.log(`[swarm:${swarmId.slice(0, 8)}] agent ${agentNum} started: ${agentTaskId.slice(0, 8)} (model: ${agentModel})`);
   }
 
-  return c.json({ swarm_id: swarmId, agent_ids: swarm.agentIds, subtasks, status: "running" }, 201);
+  return c.json({
+    swarm_id: swarmId,
+    agent_ids: swarm.agentIds,
+    agent_models: models,
+    subtasks,
+    status: "running",
+  }, 201);
 });
 
 /** GET /v1/agent/swarm/:id — get swarm status (all agents). */
 app.get("/v1/agent/swarm/:id", (c) => {
   const swarm = swarms.get(c.req.param("id"));
   if (!swarm) return c.json({ error: "not_found" }, 404);
-  const agents = swarm.agentIds.map((aid) => {
+  const agents = swarm.agentIds.map((aid, i) => {
     const t = tasks.get(aid);
     return {
       id: aid,
       status: t?.status ?? "unknown",
+      model: swarm.agentModels[i] ?? "unknown",
       events: t?.events.slice(-30) ?? [],
       result: t?.result,
     };
   });
   const allDone = agents.every((a) => a.status === "complete" || a.status === "failed" || a.status === "killed");
+  const sharedContext = Object.fromEntries(swarm.sharedContext);
   return c.json({
     id: swarm.id,
     status: allDone ? "complete" : swarm.status,
     subtasks: swarm.subtasks,
+    agent_models: swarm.agentModels,
     agents,
+    shared_context: sharedContext,
   });
 });
 

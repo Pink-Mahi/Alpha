@@ -86,6 +86,7 @@ export const task = pgTable("task", {
   repo_ref: text("repo_ref"),
   model: text("model"), // e.g. "anthropic:claude-3-5-sonnet-latest" — null = auto-pick
   agent_count: integer("agent_count").notNull().default(1), // 1-5 agents for swarm mode
+  agent_models: text("agent_models"), // JSON array of per-agent models for multi-provider swarms
   created_at: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

@@ -113,6 +113,16 @@ conversationRoutes.post("/v1/tasks/:id/messages", async (c) => {
   const agentCount = t.agent_count ?? 1;
 
   if (agentCount > 1) {
+    // Parse per-agent models if stored
+    let agentModels: string[] | undefined;
+    try { agentModels = t.agent_models ? JSON.parse(t.agent_models) as string[] : undefined; } catch { /* ignore */ }
+
+    // Build api_keys map for all providers
+    const apiKeysMap: Record<string, string> = {};
+    for (const k of keys) {
+      apiKeysMap[k.provider] = Buffer.from(k.encrypted_key, "base64").toString("utf8");
+    }
+
     // Swarm mode
     const swarmBody = {
       spec: body.content,
@@ -120,9 +130,11 @@ conversationRoutes.post("/v1/tasks/:id/messages", async (c) => {
       org_id: p.org_id,
       agent_count: agentCount,
       model,
+      models: agentModels,
       budget_usd: parseFloat(t.budget_usd),
       max_iterations: 20,
       api_key: apiKey,
+      api_keys: apiKeysMap,
     };
 
     let swarmResp: Response;
@@ -141,7 +153,7 @@ conversationRoutes.post("/v1/tasks/:id/messages", async (c) => {
       return c.json({ error: "agent_error", detail: errBody }, 502);
     }
 
-    const swarmData = await swarmResp.json() as { swarm_id: string; agent_ids: string[]; subtasks: string[] };
+    const swarmData = await swarmResp.json() as { swarm_id: string; agent_ids: string[]; agent_models: string[]; subtasks: string[] };
 
     await db.insert(agentRun).values({
       org_id: p.org_id,
@@ -155,6 +167,7 @@ conversationRoutes.post("/v1/tasks/:id/messages", async (c) => {
       ok: true,
       swarm_id: swarmData.swarm_id,
       agent_ids: swarmData.agent_ids,
+      agent_models: swarmData.agent_models,
       subtasks: swarmData.subtasks,
       agent_count: agentCount,
       model,

@@ -36,6 +36,7 @@ export function Tasks() {
   const [runtimePref, setRuntimePref] = useState("local");
   const [selectedModel, setSelectedModel] = useState("");
   const [agentCount, setAgentCount] = useState(1);
+  const [agentModels, setAgentModels] = useState<string[]>([]);
   const [providers, setProviders] = useState<ProviderGroup[]>([]);
   const [hasAnyKey, setHasAnyKey] = useState(false);
   const [error, setError] = useState("");
@@ -90,6 +91,7 @@ export function Tasks() {
           runtime_pref: runtimePref,
           model: selectedModel || undefined,
           agent_count: agentCount,
+          agent_models: agentCount > 1 ? agentModels.slice(0, agentCount) : undefined,
         }),
       });
       const data = await resp.json();
@@ -179,11 +181,55 @@ export function Tasks() {
                     type="button"
                     className={agentCount === n ? "btn" : "btn btn-secondary"}
                     style={{ width: "2.5rem", padding: "0.3rem", fontSize: "0.8125rem" }}
-                    onClick={() => setAgentCount(n)}
+                    onClick={() => {
+                      setAgentCount(n);
+                      // Initialize/resize agentModels array
+                      setAgentModels((prev) => {
+                        const next = [...prev];
+                        while (next.length < n) next.push(selectedModel || (availableModels()[0]?.id ?? ""));
+                        return next.slice(0, n);
+                      });
+                    }}
                   >{n}</button>
                 ))}
               </div>
             </div>
+
+            {/* Per-agent model picker (only in swarm mode) */}
+            {agentCount > 1 && (
+              <div>
+                <label className="muted" style={{ fontSize: "0.75rem", display: "block", marginBottom: "0.5rem" }}>
+                  Assign models to each agent <span style={{ color: "#1f6feb" }}>— mix providers for diverse perspectives</span>
+                </label>
+                {Array.from({ length: agentCount }, (_, i) => (
+                  <div key={i} style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.4rem" }}>
+                    <span style={{ fontSize: "0.75rem", fontWeight: 600, width: "4rem", flexShrink: 0 }}>Agent {i + 1}</span>
+                    <select
+                      value={agentModels[i] ?? selectedModel}
+                      onChange={(e) => {
+                        setAgentModels((prev) => {
+                          const next = [...prev];
+                          while (next.length <= i) next.push("");
+                          next[i] = e.target.value;
+                          return next;
+                        });
+                      }}
+                      style={{ fontSize: "0.8125rem" }}
+                    >
+                      {providers.filter((p) => p.has_key).map((pg) => (
+                        <optgroup key={pg.provider} label={pg.provider.charAt(0).toUpperCase() + pg.provider.slice(1)}>
+                          {pg.models.map((m) => (
+                            <option key={m.id} value={m.id}>
+                              {m.name} {m.tags.includes("recommended") ? "⭐" : ""}
+                            </option>
+                          ))}
+                        </optgroup>
+                      ))}
+                    </select>
+                  </div>
+                ))}
+              </div>
+            )}
             <button type="submit" className="btn" disabled={creating || !hasAnyKey}>
               {creating ? "Creating..." : "Create & Start Chatting"}
             </button>

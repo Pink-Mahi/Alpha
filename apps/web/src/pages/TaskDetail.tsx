@@ -66,7 +66,7 @@ export function TaskDetail() {
   const [agentTaskId, setAgentTaskId] = useState<string | null>(null);
   // Swarm state
   const [swarmId, setSwarmId] = useState<string | null>(null);
-  const [swarmAgents, setSwarmAgents] = useState<Array<{ id: string; status: string; events: AgentEvent[]; result?: { summary: string; costUsd: number; iterations: number; success: boolean } }>>([]);
+  const [swarmAgents, setSwarmAgents] = useState<Array<{ id: string; status: string; model?: string; events: AgentEvent[]; result?: { summary: string; costUsd: number; iterations: number; success: boolean } }>>([]);
   const [swarmSubtasks, setSwarmSubtasks] = useState<string[]>([]);
   const [activeAgentTab, setActiveAgentTab] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -420,6 +420,11 @@ export function TaskDetail() {
                       background: agent.status === "complete" ? "#238636" : agent.status === "running" ? "#1f6feb" : agent.status === "failed" ? "#f85149" : "var(--muted)",
                     }} />
                     Agent {i + 1}
+                    {agent.model && (
+                      <span style={{ fontSize: "0.6rem", opacity: 0.8, marginLeft: "0.2rem" }}>
+                        {agent.model.split(":")[1]?.split("/").pop() ?? agent.model}
+                      </span>
+                    )}
                   </button>
                 ))}
               </div>
