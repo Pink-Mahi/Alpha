@@ -302,6 +302,125 @@ taskRoutes.post("/v1/tasks/:id/run", async (c) => {
   }
 });
 
+/** GET /v1/tasks/:id/tree — recursive directory tree for the file explorer. */
+taskRoutes.get("/v1/tasks/:id/tree", async (c) => {
+  const p = c.get("principal")!;
+  const id = c.req.param("id");
+  const db = getDb();
+  const taskRows = await db.select().from(task).where(and(eq(task.id, id), eq(task.org_id, p.org_id))).limit(1);
+  if (taskRows.length === 0) return c.json({ error: "not_found" }, 404);
+  const t = taskRows[0]!;
+  const cwd = t.repo_ref ?? process.cwd();
+  const sub = c.req.query("path") ?? "";
+
+  const { join, resolve: pathResolve } = await import("node:path");
+  const targetDir = pathResolve(cwd, sub);
+  if (!targetDir.startsWith(pathResolve(cwd))) return c.json({ error: "path_outside_cwd" }, 400);
+
+  try {
+    const tree = await buildTree(targetDir, pathResolve(cwd), 3);
+    return c.json({ tree, cwd });
+  } catch (e) {
+    return c.json({ error: "failed", detail: String(e) }, 500);
+  }
+});
+
+/** POST /v1/tasks/:id/upload — upload a file (base64 body) to the project. */
+taskRoutes.post("/v1/tasks/:id/upload", async (c) => {
+  const p = c.get("principal")!;
+  const id = c.req.param("id");
+  const body = await c.req.json().catch(() => ({})) as { path?: string; content?: string };
+  if (!body.path || body.content === undefined) return c.json({ error: "path and content required" }, 400);
+
+  const db = getDb();
+  const taskRows = await db.select().from(task).where(and(eq(task.id, id), eq(task.org_id, p.org_id))).limit(1);
+  if (taskRows.length === 0) return c.json({ error: "not_found" }, 404);
+  const t = taskRows[0]!;
+  const cwd = t.repo_ref ?? process.cwd();
+
+  const { join, resolve: pathResolve, dirname } = await import("node:path");
+  const { writeFileSync, mkdirSync } = await import("node:fs");
+  const targetPath = pathResolve(cwd, body.path);
+  if (!targetPath.startsWith(pathResolve(cwd))) return c.json({ error: "path_outside_cwd" }, 400);
+
+  try {
+    mkdirSync(dirname(targetPath), { recursive: true });
+    // content is base64-encoded
+    const data = Buffer.from(body.content, "base64");
+    writeFileSync(targetPath, data);
+    return c.json({ ok: true, path: body.path, bytes: data.length });
+  } catch (e) {
+    return c.json({ error: "upload_failed", detail: String(e) }, 500);
+  }
+});
+
+/** DELETE /v1/tasks/:id/file — delete a file from the project. */
+taskRoutes.delete("/v1/tasks/:id/file", async (c) => {
+  const p = c.get("principal")!;
+  const id = c.req.param("id");
+  const filePath = c.req.query("path");
+  if (!filePath) return c.json({ error: "path required" }, 400);
+
+  const db = getDb();
+  const taskRows = await db.select().from(task).where(and(eq(task.id, id), eq(task.org_id, p.org_id))).limit(1);
+  if (taskRows.length === 0) return c.json({ error: "not_found" }, 404);
+  const t = taskRows[0]!;
+  const cwd = t.repo_ref ?? process.cwd();
+
+  const { resolve: pathResolve } = await import("node:path");
+  const { unlinkSync } = await import("node:fs");
+  const targetPath = pathResolve(cwd, filePath);
+  if (!targetPath.startsWith(pathResolve(cwd))) return c.json({ error: "path_outside_cwd" }, 400);
+
+  try {
+    unlinkSync(targetPath);
+    return c.json({ ok: true, path: filePath });
+  } catch (e) {
+    return c.json({ error: "delete_failed", detail: String(e) }, 500);
+  }
+});
+
+/** Build a recursive directory tree (limited depth). */
+async function buildTree(dir: string, rootDir: string, maxDepth: number): Promise<TreeNode[]> {
+  if (maxDepth <= 0) return [];
+  const { readdirSync, statSync } = await import("node:fs");
+  const { join, relative } = await import("node:path");
+  const nodes: TreeNode[] = [];
+
+  try {
+    const entries = readdirSync(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      // Skip hidden files, node_modules, .git, dist
+      if (entry.name.startsWith(".") || entry.name === "node_modules" || entry.name === "dist" || entry.name === "__pycache__") continue;
+      const fullPath = join(dir, entry.name);
+      const relPath = relative(rootDir, fullPath).replace(/\\/g, "/");
+      if (entry.isDirectory()) {
+        const children = await buildTree(fullPath, rootDir, maxDepth - 1);
+        nodes.push({ name: entry.name, path: relPath, type: "dir", children });
+      } else {
+        const stat = statSync(fullPath);
+        const ext = entry.name.split(".").pop()?.toLowerCase() ?? "";
+        nodes.push({ name: entry.name, path: relPath, type: "file", ext, size: stat.size });
+      }
+    }
+  } catch { /* ignore permission errors */ }
+  // Sort: dirs first, then files, alphabetically
+  nodes.sort((a, b) => {
+    if (a.type !== b.type) return a.type === "dir" ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+  return nodes;
+}
+
+interface TreeNode {
+  name: string;
+  path: string;
+  type: "file" | "dir";
+  ext?: string;
+  size?: number;
+  children?: TreeNode[];
+}
+
 /** List files in a directory (non-recursive, top-level only). */
 async function listFiles(dir: string): Promise<Array<{ name: string; size: number; ext: string }>> {
   const { readdirSync, statSync } = await import("node:fs");

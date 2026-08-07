@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
+import { FileExplorer } from "../components/FileExplorer";
 
 interface AgentEvent {
   version: string;
@@ -69,6 +70,7 @@ export function TaskDetail() {
   const [providers, setProviders] = useState<ProviderGroup[]>([]);
   const [selectedModel, setSelectedModel] = useState("");
   const [editingTitle, setEditingTitle] = useState(false);
+  const [showFiles, setShowFiles] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
   const eventLogRef = useRef<HTMLDivElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -291,6 +293,12 @@ export function TaskDetail() {
             </optgroup>
           ))}
         </select>
+        <button
+          className={showFiles ? "btn" : "btn btn-secondary"}
+          style={{ fontSize: "0.75rem", padding: "0.25rem 0.6rem" }}
+          onClick={() => setShowFiles(!showFiles)}
+          title="Toggle file explorer"
+        >📁 Files</button>
         <span style={{
           padding: "0.25rem 0.6rem",
           borderRadius: "4px",
@@ -318,25 +326,33 @@ export function TaskDetail() {
         </div>
       )}
 
-      {/* Chat area */}
-      <div ref={eventLogRef} style={{ flex: 1, overflowY: "auto", marginBottom: "0.75rem" }}>
-        {/* Conversation messages */}
-        {messages.map((m) => (
-          <MessageBubble key={m.id} message={m} />
-        ))}
+      {/* Main content: chat + optional file explorer sidebar */}
+      <div style={{ flex: 1, display: "flex", gap: "0.75rem", overflow: "hidden", marginBottom: "0.75rem" }}>
+        {/* Chat area */}
+        <div ref={eventLogRef} style={{ flex: 1, overflowY: "auto" }}>
+          {/* Conversation messages */}
+          {messages.map((m) => (
+            <MessageBubble key={m.id} message={m} />
+          ))
 
-        {/* Live agent events (while running) */}
-        {agentTaskId && events.length > 0 && (
-          <div style={{ marginBottom: "1rem" }}>
-            <div style={{ fontSize: "0.75rem", color: "#1f6feb", marginBottom: "0.5rem" }}>
-              ● Agent working{totalCost > 0 ? ` — $${totalCost.toFixed(4)}` : ""}
+          /* Live agent events (while running) */
+          }
+          {agentTaskId && events.length > 0 && (
+            <div style={{ marginBottom: "1rem" }}>
+              <div style={{ fontSize: "0.75rem", color: "#1f6feb", marginBottom: "0.5rem" }}>
+                ● Agent working{totalCost > 0 ? ` — $${totalCost.toFixed(4)}` : ""}
+              </div>
+              {events.map((e, i) => <EventRow key={i} event={e} />)}
             </div>
-            {events.map((e, i) => <EventRow key={i} event={e} />)}
+          )}
+        </div>
+
+        {/* File explorer sidebar */}
+        {showFiles && (
+          <div className="card" style={{ width: "480px", flexShrink: 0, padding: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+            <FileExplorer taskId={id!} />
           </div>
         )}
-
-        {/* File browser after completion */}
-        {agentState?.status === "complete" && <FileBrowser taskId={id!} />}
       </div>
 
       {/* Input box */}
@@ -476,117 +492,6 @@ function EventRow({ event }: { event: AgentEvent }) {
         </div>
       );
   }
-}
-
-/** File browser with code view, run button, and live HTML preview. */
-function FileBrowser({ taskId }: { taskId: string }) {
-  const [files, setFiles] = useState<Array<{ name: string; size: number; ext: string }>>([]);
-  const [selectedFile, setSelectedFile] = useState<string | null>(null);
-  const [fileContent, setFileContent] = useState<string>("");
-  const [fileExt, setFileExt] = useState<string>("");
-  const [running, setRunning] = useState(false);
-  const [runOutput, setRunOutput] = useState<{ stdout: string; stderr: string; exitCode: number } | null>(null);
-  const [showPreview, setShowPreview] = useState(false);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => { fetchFiles(); }, []);
-
-  async function fetchFiles() {
-    const token = localStorage.getItem("alpha_token");
-    try {
-      const resp = await fetch(`/v1/tasks/${taskId}/files`, { headers: { Authorization: `Bearer ${token}` } });
-      if (resp.ok) {
-        const data = await resp.json();
-        setFiles(data.files ?? []);
-        const first = (data.files ?? []).find((f: { ext: string }) => ["html", "py", "js"].includes(f.ext));
-        if (first) loadFile(first.name);
-      }
-    } catch { /* ignore */ }
-    finally { setLoading(false); }
-  }
-
-  async function loadFile(path: string) {
-    setSelectedFile(path);
-    setRunOutput(null);
-    setShowPreview(false);
-    const token = localStorage.getItem("alpha_token");
-    try {
-      const resp = await fetch(`/v1/tasks/${taskId}/file?path=${encodeURIComponent(path)}`, { headers: { Authorization: `Bearer ${token}` } });
-      if (resp.ok) {
-        const data = await resp.json();
-        setFileContent(data.content ?? "");
-        setFileExt(data.ext ?? "");
-        if (data.ext === "html") setShowPreview(true);
-      }
-    } catch { /* ignore */ }
-  }
-
-  async function runFile() {
-    if (!selectedFile) return;
-    setRunning(true);
-    setRunOutput(null);
-    setShowPreview(false);
-    const token = localStorage.getItem("alpha_token");
-    try {
-      const resp = await fetch(`/v1/tasks/${taskId}/run`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ path: selectedFile }),
-      });
-      if (resp.ok) {
-        const data = await resp.json();
-        setRunOutput({ stdout: data.stdout ?? "", stderr: data.stderr ?? "", exitCode: data.exitCode ?? 0 });
-      } else {
-        const data = await resp.json().catch(() => ({}));
-        setRunOutput({ stdout: "", stderr: data.error ?? "Failed to run", exitCode: -1 });
-      }
-    } catch (e) {
-      setRunOutput({ stdout: "", stderr: `Network error: ${e}`, exitCode: -1 });
-    }
-    finally { setRunning(false); }
-  }
-
-  if (loading || files.length === 0) return null;
-  const canRun = ["py", "js", "ts"].includes(fileExt);
-  const canPreview = fileExt === "html";
-
-  return (
-    <div className="card" style={{ marginTop: "1rem", padding: 0, overflow: "hidden" }}>
-      <div style={{ padding: "0.5rem 0.75rem", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <span style={{ fontWeight: 600, fontSize: "0.8125rem" }}>📁 Files</span>
-        <div style={{ display: "flex", gap: "0.5rem" }}>
-          {canRun && <button className="btn" style={{ fontSize: "0.7rem", padding: "0.2rem 0.5rem" }} onClick={runFile} disabled={running}>{running ? "Running..." : "▶ Run"}</button>}
-          {canPreview && <button className="btn" style={{ fontSize: "0.7rem", padding: "0.2rem 0.5rem" }} onClick={() => setShowPreview(!showPreview)}>{showPreview ? "📄 Code" : "👁 Preview"}</button>}
-        </div>
-      </div>
-      <div style={{ display: "flex", minHeight: "250px" }}>
-        <div style={{ width: "180px", borderRight: "1px solid var(--border)", padding: "0.4rem", overflowY: "auto" }}>
-          {files.map((f) => (
-            <div key={f.name} onClick={() => loadFile(f.name)} style={{
-              padding: "0.3rem 0.5rem", cursor: "pointer", borderRadius: "var(--radius)",
-              fontSize: "0.75rem", fontFamily: "monospace",
-              background: selectedFile === f.name ? "var(--border)" : "transparent",
-            }}>{f.name}</div>
-          ))}
-        </div>
-        <div style={{ flex: 1, overflow: "auto" }}>
-          {showPreview && canPreview ? (
-            <iframe srcDoc={fileContent} title="Preview" style={{ width: "100%", height: "350px", border: "none", background: "white" }} sandbox="allow-scripts allow-same-origin" />
-          ) : runOutput ? (
-            <div style={{ padding: "0.5rem", fontFamily: "monospace", fontSize: "0.75rem" }}>
-              {runOutput.stdout && <pre style={{ whiteSpace: "pre-wrap", margin: 0, marginBottom: "0.5rem" }}>{runOutput.stdout}</pre>}
-              {runOutput.stderr && <pre style={{ whiteSpace: "pre-wrap", margin: 0, color: "#f85149" }}>{runOutput.stderr}</pre>}
-              <div className="muted" style={{ fontSize: "0.7rem", marginTop: "0.5rem" }}>Exit: {runOutput.exitCode}</div>
-            </div>
-          ) : selectedFile ? (
-            <pre style={{ padding: "0.5rem", margin: 0, fontSize: "0.75rem", whiteSpace: "pre-wrap", fontFamily: "monospace", overflowX: "auto" }}>{fileContent || "(empty)"}</pre>
-          ) : (
-            <div className="muted" style={{ padding: "1rem", fontSize: "0.8125rem" }}>Select a file</div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
 }
 
 function truncate(s: unknown, max: number): string {
