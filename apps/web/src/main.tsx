@@ -8,6 +8,7 @@ import { Tasks } from "./pages/Tasks.js";
 import { Billing } from "./pages/Billing.js";
 import { Marketplace } from "./pages/Marketplace.js";
 import { Settings } from "./pages/Settings.js";
+import { TaskDetail } from "./pages/TaskDetail.js";
 import "./index.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
@@ -18,6 +19,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
         <Route path="/" element={<App />}>
           <Route index element={<Dashboard />} />
           <Route path="tasks" element={<Tasks />} />
+          <Route path="tasks/:id" element={<TaskDetail />} />
           <Route path="billing" element={<Billing />} />
           <Route path="marketplace" element={<Marketplace />} />
           <Route path="settings" element={<Settings />} />

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 interface Task {
   id: string;
@@ -9,6 +10,7 @@ interface Task {
 }
 
 export function Tasks() {
+  const navigate = useNavigate();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [newTitle, setNewTitle] = useState("");
@@ -141,7 +143,13 @@ export function Tasks() {
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
             {tasks.map((t) => (
-              <div key={t.id} style={{ display: "flex", justifyContent: "space-between", padding: "0.75rem", background: "var(--bg)", borderRadius: "var(--radius)" }}>
+              <div
+                key={t.id}
+                onClick={() => navigate(`/tasks/${t.id}`)}
+                style={{ display: "flex", justifyContent: "space-between", padding: "0.75rem", background: "var(--bg)", borderRadius: "var(--radius)", cursor: "pointer", transition: "background 0.15s" }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = "var(--border)")}
+                onMouseLeave={(e) => (e.currentTarget.style.background = "var(--bg)")}
+              >
                 <div>
                   <div style={{ fontWeight: 500 }}>{t.title}</div>
                   <div className="muted" style={{ fontSize: "0.8125rem" }}>{t.id}</div>
