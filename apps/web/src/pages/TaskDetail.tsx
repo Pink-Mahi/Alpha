@@ -81,6 +81,12 @@ export function TaskDetail() {
   const [titleDraft, setTitleDraft] = useState("");
   const eventLogRef = useRef<HTMLDivElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Voice + swarm communication state
+  const [isRecording, setIsRecording] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const [swarmMessages, setSwarmMessages] = useState<Array<{ id: string; text: string; ts: string; source: string }>>([]);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
 
   const fetchTask = useCallback(async () => {
     const token = localStorage.getItem("alpha_token");
@@ -154,10 +160,12 @@ export function TaskDetail() {
             subtasks: string[];
             agents: Array<{ id: string; status: string; model?: string; events: AgentEvent[]; result?: { summary: string; costUsd: number; iterations: number; success: boolean }; directives?: string[] }>;
             supervisors?: Array<{ id: string; status: string; model?: string; events: AgentEvent[]; result?: { summary: string; costUsd: number; iterations: number; success: boolean } }>;
+            user_messages?: Array<{ id: string; text: string; ts: string; source: string }>;
           };
           setSwarmAgents(data.agents ?? []);
           setSwarmSupervisors(data.supervisors ?? []);
           setSwarmSubtasks(data.subtasks ?? []);
+          if (data.user_messages) setSwarmMessages(data.user_messages);
           if (data.status === "complete") {
             if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
             fetchMessages();
@@ -248,6 +256,85 @@ export function TaskDetail() {
       setError("Network error — is the backend running?");
       setSending(false);
     }
+  }
+
+  // --- Voice recording (microphone) ---
+  async function startRecording() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      audioChunksRef.current = [];
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
+      recorder.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
+        await transcribeAndSend(audioBlob);
+      };
+      recorder.start();
+      mediaRecorderRef.current = recorder;
+      setIsRecording(true);
+    } catch (e) {
+      setError("Microphone access denied. Please allow microphone access in your browser settings.");
+    }
+  }
+
+  function stopRecording() {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
+      mediaRecorderRef.current.stop();
+    }
+    setIsRecording(false);
+  }
+
+  async function transcribeAndSend(audioBlob: Blob) {
+    const token = localStorage.getItem("alpha_token");
+    if (!token) return;
+    setIsTranscribing(true);
+    setError("");
+    try {
+      const formData = new FormData();
+      formData.append("audio", audioBlob, "recording.webm");
+      const resp = await fetch(`/v1/tasks/${id}/transcribe`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        setError(err.message ?? "Speech-to-text failed. Make sure you have an OpenAI API key configured.");
+        return;
+      }
+      const data = await resp.json() as { text: string };
+      if (data.text && data.text.trim()) {
+        setInputText(data.text.trim());
+        // If swarm is running, also send directly to supervisor
+        if (swarmId && isRunning) {
+          await sendSwarmMessage(data.text.trim(), "voice");
+        }
+      }
+    } catch (e) {
+      setError("Failed to transcribe audio. Please try again or type your message.");
+    } finally {
+      setIsTranscribing(false);
+    }
+  }
+
+  // --- Swarm message sending (real-time communication with supervisor) ---
+  async function sendSwarmMessage(text: string, source: string = "web") {
+    const token = localStorage.getItem("alpha_token");
+    if (!token || !swarmId) return;
+    try {
+      const resp = await fetch(`/v1/tasks/${id}/message`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ text, source, swarm_id: swarmId }),
+      });
+      if (resp.ok) {
+        const data = await resp.json() as { ok: boolean; message_id: string };
+        setSwarmMessages((prev) => [...prev, { id: data.message_id, text, ts: new Date().toISOString(), source }]);
+      }
+    } catch { /* ignore */ }
   }
 
   async function saveTitle() {
@@ -520,29 +607,87 @@ export function TaskDetail() {
       </div>
 
       {/* Input box */}
-      <div style={{ flexShrink: 0, display: "flex", gap: "0.5rem", alignItems: "flex-end" }}>
-        <textarea
-          value={inputText}
-          onChange={(e) => setInputText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              sendMessage();
-            }
-          }}
-          placeholder={isRunning ? "Agent is working..." : "Send a message to the agent... (Enter to send, Shift+Enter for newline)"}
-          disabled={sending}
-          rows={2}
-          style={{ flex: 1, resize: "none", fontSize: "0.875rem" }}
-        />
-        <button
-          className="btn"
-          onClick={sendMessage}
-          disabled={sending || !inputText.trim()}
-          style={{ height: "fit-content" }}
-        >
-          {sending ? "Working..." : "Send ↵"}
-        </button>
+      <div style={{ flexShrink: 0 }}>
+        {/* Swarm messages display (real-time user → supervisor) */}
+        {swarmMessages.length > 0 && (
+          <div style={{ marginBottom: "0.5rem", padding: "0.5rem", background: "rgba(210, 153, 34, 0.08)", borderRadius: "var(--radius)", borderLeft: "3px solid #d29922" }}>
+            <div style={{ fontSize: "0.7rem", color: "#d29922", fontWeight: 600, marginBottom: "0.25rem" }}>📡 Messages to Supervisor</div>
+            {swarmMessages.map((m) => (
+              <div key={m.id} style={{ fontSize: "0.75rem", color: "var(--muted)", marginBottom: "0.15rem" }}>
+                <span style={{ color: m.source === "voice" ? "#a371f7" : m.source === "telegram" ? "#1f6feb" : "#238636", fontWeight: 600 }}>
+                  {m.source === "voice" ? "🎤" : m.source === "telegram" ? "✈️" : "💬"}
+                </span>{" "}
+                {m.text.slice(0, 100)}{m.text.length > 100 ? "..." : ""}
+              </div>
+            ))}
+          </div>
+        )}
+        <div style={{ display: "flex", gap: "0.5rem", alignItems: "flex-end" }}>
+          {/* Microphone button */}
+          <button
+            className="btn"
+            onClick={isRecording ? stopRecording : startRecording}
+            disabled={isTranscribing}
+            style={{
+              height: "fit-content",
+              background: isRecording ? "#f85149" : isTranscribing ? "#a371f7" : "var(--card-bg)",
+              border: `1px solid ${isRecording ? "#f85149" : "var(--border)"}`,
+              color: isRecording || isTranscribing ? "#fff" : "var(--text)",
+              minWidth: "40px",
+            }}
+            title={isRecording ? "Stop recording" : "Speak to the agent"}
+          >
+            {isTranscribing ? "…" : isRecording ? "⏹" : "🎤"}
+          </button>
+          <textarea
+            value={inputText}
+            onChange={(e) => setInputText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                if (swarmId && isRunning && e.ctrlKey) {
+                  sendSwarmMessage(inputText.trim(), "web");
+                  setInputText("");
+                } else {
+                  sendMessage();
+                }
+              }
+            }}
+            placeholder={isRunning
+              ? (swarmId
+                ? "Agent is working... Type to send to supervisor (Ctrl+Enter) or start a new task (Enter)"
+                : "Agent is working... (Enter to send, Shift+Enter for newline)")
+              : "Send a message to the agent... (Enter to send, Shift+Enter for newline)"}
+            disabled={sending}
+            rows={2}
+            style={{ flex: 1, resize: "none", fontSize: "0.875rem" }}
+          />
+          {/* Send to supervisor button (only when swarm is running) */}
+          {swarmId && isRunning && (
+            <button
+              className="btn"
+              onClick={() => {
+                if (inputText.trim()) {
+                  sendSwarmMessage(inputText.trim(), "web");
+                  setInputText("");
+                }
+              }}
+              disabled={!inputText.trim()}
+              style={{ height: "fit-content", background: "rgba(210, 153, 34, 0.15)", border: "1px solid #d29922", color: "#d29922" }}
+              title="Send message to the supervisor agent"
+            >
+              📡
+            </button>
+          )}
+          <button
+            className="btn"
+            onClick={sendMessage}
+            disabled={sending || !inputText.trim()}
+            style={{ height: "fit-content" }}
+          >
+            {sending ? "Working..." : "Send ↵"}
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -666,6 +811,21 @@ function EventRow({ event }: { event: AgentEvent }) {
           </div>
         </div>
       );
+
+    case "user.message": {
+      const source = (event.payload as { source?: string }).source ?? "web";
+      const text = (event.payload as { text?: string }).text ?? "";
+      const icon = source === "voice" ? "🎤" : source === "telegram" ? "✈️" : "💬";
+      const label = source === "voice" ? "Voice Message" : source === "telegram" ? "Telegram Message" : "User Message";
+      return (
+        <div style={{ marginBottom: "0.5rem", paddingLeft: "0.5rem", borderLeft: "3px solid #238636" }}>
+          <div style={{ fontSize: "0.7rem", color: "#238636", fontWeight: 600 }}>{icon} {label}</div>
+          <div style={{ fontSize: "0.75rem", color: "var(--text)", marginTop: "0.15rem", whiteSpace: "pre-wrap" }}>
+            {text}
+          </div>
+        </div>
+      );
+    }
 
     case "task.complete":
       return (

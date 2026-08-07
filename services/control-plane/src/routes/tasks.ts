@@ -568,3 +568,95 @@ function resolve(...paths: string[]): string {
   const { resolve: pathResolve } = require("node:path");
   return pathResolve(...paths);
 }
+
+// --- Real-time user communication with running swarms ---
+
+/** POST /v1/tasks/:id/message — send a message to the running swarm's supervisor. */
+taskRoutes.post("/v1/tasks/:id/message", async (c) => {
+  const p = c.get("principal")!;
+  const id = c.req.param("id");
+  const db = getDb();
+  const taskRows = await db.select().from(task).where(and(eq(task.id, id), eq(task.org_id, p.org_id))).limit(1);
+  if (taskRows.length === 0) return c.json({ error: "not_found" }, 404);
+
+  const body = await c.req.json().catch(() => ({}));
+  const text = body.text as string | undefined;
+  const source = (body.source as string) ?? "web";
+  const swarmId = body.swarm_id as string | undefined;
+
+  if (!text || text.trim().length === 0) return c.json({ error: "empty_message" }, 400);
+  if (!swarmId) return c.json({ error: "swarm_id required" }, 400);
+
+  try {
+    const resp = await fetch(`${LOCAL_AGENT_URL}/v1/agent/swarm/${swarmId}/message`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: text.trim(), source }),
+    });
+    if (!resp.ok) {
+      const errBody = await resp.text();
+      return c.json({ error: "agent_error", detail: errBody }, 502);
+    }
+    const data = await resp.json() as { ok: boolean; message_id: string; delivered_to: number };
+    return c.json(data);
+  } catch {
+    return c.json({ error: "agent_unreachable" }, 502);
+  }
+});
+
+/** POST /v1/tasks/:id/transcribe — speech-to-text via OpenAI Whisper API. */
+taskRoutes.post("/v1/tasks/:id/transcribe", async (c) => {
+  const p = c.get("principal")!;
+  const id = c.req.param("id");
+  const db = getDb();
+  const taskRows = await db.select().from(task).where(and(eq(task.id, id), eq(task.org_id, p.org_id))).limit(1);
+  if (taskRows.length === 0) return c.json({ error: "not_found" }, 404);
+
+  // Get the user's API key for Whisper
+  const keys = await db.select().from(byoKey).where(eq(byoKey.org_id, p.org_id));
+  const openaiKey = keys.find((k) => k.provider === "openai");
+  if (!openaiKey) return c.json({ error: "no_openai_key", message: "Add an OpenAI API key in Settings for speech-to-text." }, 400);
+  const decryptedKey = Buffer.from(openaiKey.encrypted_key, "base64").toString("utf8");
+
+  // Read the audio file from the request body
+  const contentType = c.req.header("content-type") ?? "";
+  let audioBuffer: ArrayBuffer;
+  let mimeType = "audio/webm";
+
+  if (contentType.includes("multipart/form-data")) {
+    const formData = await c.req.formData();
+    const file = formData.get("audio") as File | null;
+    if (!file) return c.json({ error: "no_audio_file" }, 400);
+    audioBuffer = await file.arrayBuffer();
+    mimeType = file.type || "audio/webm";
+  } else {
+    audioBuffer = await c.req.arrayBuffer();
+  }
+
+  if (audioBuffer.byteLength === 0) return c.json({ error: "empty_audio" }, 400);
+
+  // Send to OpenAI Whisper API
+  try {
+    const ext = mimeType.includes("mp4") ? "mp4" : mimeType.includes("ogg") ? "ogg" : "webm";
+    const formData = new FormData();
+    formData.append("file", new Blob([audioBuffer], { type: mimeType }), `audio.${ext}`);
+    formData.append("model", "whisper-1");
+    formData.append("language", "en");
+
+    const resp = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${decryptedKey}` },
+      body: formData,
+    });
+
+    if (!resp.ok) {
+      const errText = await resp.text();
+      return c.json({ error: "whisper_error", detail: errText }, 502);
+    }
+
+    const data = await resp.json() as { text: string };
+    return c.json({ text: data.text });
+  } catch (e) {
+    return c.json({ error: "transcription_failed", detail: String(e) }, 500);
+  }
+});

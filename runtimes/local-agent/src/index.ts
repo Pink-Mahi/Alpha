@@ -157,6 +157,7 @@ interface SwarmTask {
   subtasks: string[];
   sharedContext: Map<string, string>;
   supervisorDirectives: Map<string, string[]>; // workerAgentId → directives from supervisors
+  userMessages: Array<{ id: string; text: string; ts: string; source: "web" | "telegram" | "voice" }>; // real-time user messages to supervisor
 }
 const swarms = new Map<string, SwarmTask>();
 
@@ -195,6 +196,7 @@ app.post("/v1/agent/swarm", async (c) => {
     subtasks: [],
     sharedContext: new Map(),
     supervisorDirectives: new Map(),
+    userMessages: [],
   };
   swarms.set(swarmId, swarm);
 
@@ -345,7 +347,15 @@ Original task: ${body.spec}
 
 You have filesystem tools AND web research tools. Use web.search to find best practices and share them with workers. Read the files workers are creating. When you want to send a directive to a worker, write it to a file called .supervisor_directive_agentN.txt (where N is the agent number). The system will pick it up and redirect that worker.
 
-You are the last line of defense for quality. Be demanding. Be thorough. Be proactive. The user wants the BEST possible result, not just an adequate one.`;
+You are the last line of defense for quality. Be demanding. Be thorough. Be proactive. The user wants the BEST possible result, not just an adequate one.
+
+USER COMMUNICATION:
+The user can send you messages in real-time via the web UI, Telegram, or voice. These messages will appear as [USER MESSAGE] in your context. When you receive a user message:
+1. Acknowledge it and adjust your supervision plan accordingly
+2. Redirect workers if the user's feedback requires a change in approach
+3. If the user asks for something specific, make sure workers implement it
+4. If the user is unhappy with progress, be more proactive in directing workers
+The user is your boss. Their feedback overrides any default assumptions you have.`;
 
       const supConfig: AgentLoopConfig = {
         orgId: body.org_id ?? "00000000-0000-0000-0000-000000000000",
@@ -493,6 +503,51 @@ async function runSupervisorLoop(swarm: SwarmTask, cwd: string, persistenceMode:
   }
 }
 
+/** POST /v1/agent/swarm/:id/message — inject a user message into the running swarm (sent to supervisor). */
+app.post("/v1/agent/swarm/:id/message", async (c) => {
+  const swarm = swarms.get(c.req.param("id"));
+  if (!swarm) return c.json({ error: "not_found" }, 404);
+  const body = await c.req.json().catch(() => ({}));
+  const text = body.text as string | undefined;
+  const source = (body.source as string) ?? "web";
+  if (!text || text.trim().length === 0) return c.json({ error: "empty_message" }, 400);
+
+  const msgId = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const msg = { id: msgId, text: text.trim(), ts: new Date().toISOString(), source: source as "web" | "telegram" | "voice" };
+  swarm.userMessages.push(msg);
+
+  // Inject into all supervisor agents' external context so they see it
+  for (const supId of swarm.supervisorIds) {
+    const supTask = tasks.get(supId);
+    if (supTask && supTask.status === "running") {
+      if (supTask.config.externalContext) {
+        supTask.config.externalContext.push(`[USER MESSAGE via ${source.toUpperCase()}]\n${text.trim()}\n\nIncorporate this user feedback into your supervision. Adjust worker directives accordingly.`);
+      }
+      // Emit event for UI
+      supTask.events.push({
+        version: "1.0",
+        org_id: supTask.config.orgId,
+        run_id: supTask.config.runId,
+        task_id: supTask.config.taskId,
+        seq: supTask.events.length,
+        ts: new Date().toISOString(),
+        type: "user.message",
+        payload: { text: text.trim(), source, message_id: msgId },
+      } as unknown as AgentMessageEnvelope);
+    }
+  }
+
+  console.log(`[swarm:${swarm.id.slice(0, 8)}] user message via ${source}: ${text.trim().slice(0, 100)}`);
+  return c.json({ ok: true, message_id: msgId, delivered_to: swarm.supervisorIds.length });
+});
+
+/** GET /v1/agent/swarm/:id/messages — get all user messages for a swarm. */
+app.get("/v1/agent/swarm/:id/messages", (c) => {
+  const swarm = swarms.get(c.req.param("id"));
+  if (!swarm) return c.json({ error: "not_found" }, 404);
+  return c.json({ messages: swarm.userMessages });
+});
+
 /** GET /v1/agent/swarm/:id — get swarm status (all agents). */
 app.get("/v1/agent/swarm/:id", (c) => {
   const swarm = swarms.get(c.req.param("id"));
@@ -531,6 +586,7 @@ app.get("/v1/agent/swarm/:id", (c) => {
     agents,
     supervisors,
     shared_context: sharedContext,
+    user_messages: swarm.userMessages,
   });
 });
 
