@@ -55,6 +55,17 @@ async def complete(req: CompleteRequest) -> dict[str, Any]:
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        # Auth errors should not be retried by the client
+        status = 502
+        msg = str(e)
+        if "authentication" in msg.lower() or "401" in msg or "api_key" in msg.lower():
+            status = 401
+        elif "rate_limit" in msg.lower() or "429" in msg:
+            status = 429
+        raise HTTPException(status_code=status, detail=f"provider error: {msg}")
     return {
         "model": str(resp.model),
         "content": resp.content,

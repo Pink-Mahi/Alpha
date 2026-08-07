@@ -24,6 +24,29 @@ class OpenAIAdapter:
     def _client(self, req: RouterRequest) -> AsyncOpenAI:
         return AsyncOpenAI(api_key=req.api_key)
 
+    def _convert_tools(self, tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Convert Anthropic-style tool descriptors to OpenAI function format.
+
+        Agent loop sends: { name, description, input_schema: {...} }
+        OpenAI expects:   { type: "function", function: { name, description, parameters: {...} } }
+        """
+        converted = []
+        for t in tools:
+            # Already in OpenAI format?
+            if t.get("type") == "function" and "function" in t:
+                converted.append(t)
+                continue
+            # Anthropic format — convert
+            converted.append({
+                "type": "function",
+                "function": {
+                    "name": t.get("name", ""),
+                    "description": t.get("description", ""),
+                    "parameters": t.get("input_schema") or t.get("parameters") or {"type": "object", "properties": {}},
+                },
+            })
+        return converted
+
     async def complete(self, req: RouterRequest) -> RouterResponse:
         client = self._client(req)
         kwargs: dict[str, Any] = {
@@ -34,7 +57,7 @@ class OpenAIAdapter:
             "temperature": req.temperature,
         }
         if req.tools:
-            kwargs["tools"] = req.tools
+            kwargs["tools"] = self._convert_tools(req.tools)
         if req.tool_choice:
             kwargs["tool_choice"] = req.tool_choice
 
@@ -75,7 +98,7 @@ class OpenAIAdapter:
             "stream_options": {"include_usage": True},
         }
         if req.tools:
-            kwargs["tools"] = req.tools
+            kwargs["tools"] = self._convert_tools(req.tools)
 
         tokens_in = tokens_out = 0
         async for chunk in await client.chat.completions.create(**kwargs):
