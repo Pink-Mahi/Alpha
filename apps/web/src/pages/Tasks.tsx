@@ -4,7 +4,7 @@ interface Task {
   id: string;
   title: string;
   status: string;
-  budget_usd: number;
+  budget_usd: string;
   created_at: string;
 }
 
@@ -13,6 +13,11 @@ export function Tasks() {
   const [loading, setLoading] = useState(true);
   const [newTitle, setNewTitle] = useState("");
   const [newSpec, setNewSpec] = useState("");
+  const [budgetUsd, setBudgetUsd] = useState("2.00");
+  const [runtimePref, setRuntimePref] = useState("local");
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+  const [creating, setCreating] = useState(false);
 
   useEffect(() => {
     fetchTasks();
@@ -34,16 +39,37 @@ export function Tasks() {
 
   async function createTask(e: React.FormEvent) {
     e.preventDefault();
+    setError("");
+    setSuccess("");
+    setCreating(true);
     const token = localStorage.getItem("alpha_token");
-    const resp = await fetch("/v1/tasks", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ title: newTitle, spec: newSpec }),
-    });
-    if (resp.ok) {
+    try {
+      const resp = await fetch("/v1/tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          title: newTitle,
+          spec: newSpec,
+          budget_usd: parseFloat(budgetUsd),
+          runtime_pref: runtimePref,
+        }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        setError(data.error ?? "Failed to create task");
+        if (data.issues) {
+          setError(data.error + ": " + data.issues.map((i: { message: string }) => i.message).join(", "));
+        }
+        return;
+      }
+      setSuccess("Task created successfully!");
       setNewTitle("");
       setNewSpec("");
       fetchTasks();
+    } catch {
+      setError("Network error — is the backend running on port 8080?");
+    } finally {
+      setCreating(false);
     }
   }
 
@@ -52,12 +78,24 @@ export function Tasks() {
   return (
     <div>
       <h1 style={{ marginBottom: "1.5rem" }}>Tasks</h1>
+
+      {error && (
+        <div className="card" style={{ borderColor: "#f85149", color: "#f85149", fontSize: "0.875rem", marginBottom: "1rem" }}>
+          {error}
+        </div>
+      )}
+      {success && (
+        <div className="card" style={{ borderColor: "#238636", color: "#238636", fontSize: "0.875rem", marginBottom: "1rem" }}>
+          {success}
+        </div>
+      )}
+
       <div className="card">
         <h2>Create New Task</h2>
         <form onSubmit={createTask} style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
           <input
             type="text"
-            placeholder="Task title"
+            placeholder="Task title (e.g. 'Add login page')"
             value={newTitle}
             onChange={(e) => setNewTitle(e.target.value)}
             required
@@ -69,7 +107,31 @@ export function Tasks() {
             rows={4}
             required
           />
-          <button type="submit" className="btn">Create Task</button>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
+            <div>
+              <label className="muted" style={{ fontSize: "0.75rem", display: "block", marginBottom: "0.25rem" }}>Budget (USD)</label>
+              <input
+                type="number"
+                step="0.50"
+                min="0.50"
+                max="100"
+                placeholder="2.00"
+                value={budgetUsd}
+                onChange={(e) => setBudgetUsd(e.target.value)}
+                required
+              />
+            </div>
+            <div>
+              <label className="muted" style={{ fontSize: "0.75rem", display: "block", marginBottom: "0.25rem" }}>Runtime</label>
+              <select value={runtimePref} onChange={(e) => setRuntimePref(e.target.value)}>
+                <option value="local">Local (your machine)</option>
+                <option value="cloud">Cloud (sandboxed)</option>
+              </select>
+            </div>
+          </div>
+          <button type="submit" className="btn" disabled={creating}>
+            {creating ? "Creating..." : "Create Task"}
+          </button>
         </form>
       </div>
       <div className="card">
