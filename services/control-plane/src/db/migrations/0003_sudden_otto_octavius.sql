@@ -1,0 +1,1 @@
+ALTER TABLE "task" ADD COLUMN "agent_count" integer DEFAULT 1 NOT NULL;

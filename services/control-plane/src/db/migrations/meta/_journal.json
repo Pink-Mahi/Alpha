@@ -22,6 +22,13 @@
       "when": 1786130278662,
       "tag": "0002_next_ghost_rider",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1786134766687,
+      "tag": "0003_sudden_otto_octavius",
+      "breakpoints": true
     }
   ]
 }

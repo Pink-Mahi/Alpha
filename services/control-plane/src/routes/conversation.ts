@@ -109,7 +109,59 @@ conversationRoutes.post("/v1/tasks/:id/messages", async (c) => {
   // 5. Update task status to running
   await db.update(task).set({ status: "running", model }).where(eq(task.id, id));
 
-  // 6. Dispatch to local agent with conversation history
+  // 6. Dispatch to local agent — swarm mode if agent_count > 1
+  const agentCount = t.agent_count ?? 1;
+
+  if (agentCount > 1) {
+    // Swarm mode
+    const swarmBody = {
+      spec: body.content,
+      cwd: t.repo_ref ?? process.cwd(),
+      org_id: p.org_id,
+      agent_count: agentCount,
+      model,
+      budget_usd: parseFloat(t.budget_usd),
+      max_iterations: 20,
+      api_key: apiKey,
+    };
+
+    let swarmResp: Response;
+    try {
+      swarmResp = await fetch(`${LOCAL_AGENT_URL}/v1/agent/swarm`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(swarmBody),
+      });
+    } catch {
+      return c.json({ error: "agent_unreachable", message: "Local agent is not running." }, 502);
+    }
+
+    if (!swarmResp.ok) {
+      const errBody = await swarmResp.text();
+      return c.json({ error: "agent_error", detail: errBody }, 502);
+    }
+
+    const swarmData = await swarmResp.json() as { swarm_id: string; agent_ids: string[]; subtasks: string[] };
+
+    await db.insert(agentRun).values({
+      org_id: p.org_id,
+      user_id: p.user_id,
+      task_id: id,
+      runtime: t.runtime_pref ?? "local",
+      status: "running",
+    });
+
+    return c.json({
+      ok: true,
+      swarm_id: swarmData.swarm_id,
+      agent_ids: swarmData.agent_ids,
+      subtasks: swarmData.subtasks,
+      agent_count: agentCount,
+      model,
+    });
+  }
+
+  // Single agent mode
   const startBody = {
     spec: body.content,
     cwd: t.repo_ref ?? process.cwd(),

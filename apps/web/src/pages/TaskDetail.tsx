@@ -32,6 +32,7 @@ interface TaskData {
   budget_usd: string;
   runtime_pref: string;
   model: string | null;
+  agent_count: number;
   created_at: string;
 }
 
@@ -63,6 +64,11 @@ export function TaskDetail() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [agentState, setAgentState] = useState<AgentState | null>(null);
   const [agentTaskId, setAgentTaskId] = useState<string | null>(null);
+  // Swarm state
+  const [swarmId, setSwarmId] = useState<string | null>(null);
+  const [swarmAgents, setSwarmAgents] = useState<Array<{ id: string; status: string; events: AgentEvent[]; result?: { summary: string; costUsd: number; iterations: number; success: boolean } }>>([]);
+  const [swarmSubtasks, setSwarmSubtasks] = useState<string[]>([]);
+  const [activeAgentTab, setActiveAgentTab] = useState(0);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
@@ -132,8 +138,31 @@ export function TaskDetail() {
   }, [fetchTask, fetchMessages, fetchModels]);
 
   const pollEvents = useCallback(async () => {
-    if (!agentTaskId || !id) return;
+    if (!id) return;
     const token = localStorage.getItem("alpha_token");
+
+    // Swarm mode polling
+    if (swarmId) {
+      try {
+        const resp = await fetch(`/v1/tasks/${id}/swarm-events?swarm_id=${swarmId}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (resp.ok) {
+          const data = await resp.json() as { status: string; subtasks: string[]; agents: Array<{ id: string; status: string; events: AgentEvent[]; result?: { summary: string; costUsd: number; iterations: number; success: boolean } }> };
+          setSwarmAgents(data.agents);
+          setSwarmSubtasks(data.subtasks ?? []);
+          if (data.status === "complete") {
+            if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+            fetchMessages();
+            setSending(false);
+          }
+        }
+      } catch { /* keep polling */ }
+      return;
+    }
+
+    // Single agent mode polling
+    if (!agentTaskId) return;
     try {
       const resp = await fetch(`/v1/tasks/${id}/events?agent_task_id=${agentTaskId}`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -143,21 +172,20 @@ export function TaskDetail() {
         setAgentState(data);
         if (data.status === "complete" || data.status === "failed" || data.status === "killed") {
           if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
-          // Refresh messages to get the assistant's response
           fetchMessages();
           setSending(false);
         }
       }
     } catch { /* keep polling */ }
-  }, [agentTaskId, id, fetchMessages]);
+  }, [agentTaskId, swarmId, id, fetchMessages]);
 
   useEffect(() => {
-    if (agentTaskId) {
+    if (agentTaskId || swarmId) {
       pollEvents();
       pollRef.current = setInterval(pollEvents, 1500);
     }
     return () => { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; } };
-  }, [agentTaskId, pollEvents]);
+  }, [agentTaskId, swarmId, pollEvents]);
 
   useEffect(() => {
     if (eventLogRef.current) {
@@ -170,6 +198,9 @@ export function TaskDetail() {
     setError("");
     setSending(true);
     setAgentState(null);
+    setSwarmId(null);
+    setSwarmAgents([]);
+    setSwarmSubtasks([]);
     const token = localStorage.getItem("alpha_token");
     const userMsg = inputText.trim();
     setInputText("");
@@ -198,7 +229,14 @@ export function TaskDetail() {
         setSending(false);
         return;
       }
-      setAgentTaskId(data.agent_task_id);
+      // Handle swarm vs single agent response
+      if (data.swarm_id) {
+        setSwarmId(data.swarm_id);
+        setSwarmSubtasks(data.subtasks ?? []);
+        setActiveAgentTab(0);
+      } else {
+        setAgentTaskId(data.agent_task_id);
+      }
     } catch {
       setError("Network error — is the backend running?");
       setSending(false);
@@ -240,7 +278,7 @@ export function TaskDetail() {
   if (!task) return <div className="muted">Task not found.</div>;
 
   const events = agentState?.events ?? [];
-  const isRunning = agentState?.status === "running";
+  const isRunning = agentState?.status === "running" || (swarmId && swarmAgents.some((a) => a.status === "running")) ? true : false;
   const availableModels = providers.filter((p) => p.has_key).flatMap((p) => p.models);
   const totalCost = events
     .filter((e) => e.type === "cost.tick")
@@ -343,6 +381,70 @@ export function TaskDetail() {
                 ● Agent working{totalCost > 0 ? ` — $${totalCost.toFixed(4)}` : ""}
               </div>
               {events.map((e, i) => <EventRow key={i} event={e} />)}
+            </div>
+          )}
+
+          {/* Swarm mode: multiple agent streams with tabs */}
+          {swarmId && swarmAgents.length > 0 && (
+            <div style={{ marginBottom: "1rem" }}>
+              <div style={{ fontSize: "0.75rem", color: "#1f6feb", marginBottom: "0.5rem", display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                ● Swarm of {swarmAgents.length} agents working
+                {swarmAgents.filter((a) => a.status === "complete").length > 0 && (
+                  <span style={{ color: "#238636" }}>
+                    ({swarmAgents.filter((a) => a.status === "complete").length} done)
+                  </span>
+                )}
+              </div>
+
+              {/* Agent tabs */}
+              <div style={{ display: "flex", gap: "0.25rem", marginBottom: "0.5rem", flexWrap: "wrap" }}>
+                {swarmAgents.map((agent, i) => (
+                  <button
+                    key={agent.id}
+                    onClick={() => setActiveAgentTab(i)}
+                    style={{
+                      padding: "0.25rem 0.6rem",
+                      borderRadius: "var(--radius)",
+                      fontSize: "0.7rem",
+                      border: `1px solid ${activeAgentTab === i ? "#1f6feb" : "var(--border)"}`,
+                      background: activeAgentTab === i ? "#1f6feb" : "var(--bg)",
+                      color: activeAgentTab === i ? "white" : "inherit",
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "0.3rem",
+                    }}
+                  >
+                    <span style={{
+                      width: "0.5rem", height: "0.5rem", borderRadius: "50%",
+                      background: agent.status === "complete" ? "#238636" : agent.status === "running" ? "#1f6feb" : agent.status === "failed" ? "#f85149" : "var(--muted)",
+                    }} />
+                    Agent {i + 1}
+                  </button>
+                ))}
+              </div>
+
+              {/* Subtask description for active agent */}
+              {swarmSubtasks[activeAgentTab] && (
+                <div style={{ fontSize: "0.75rem", padding: "0.4rem 0.6rem", background: "var(--bg)", borderRadius: "var(--radius)", marginBottom: "0.5rem", borderLeft: "3px solid #1f6feb" }}>
+                  <strong>Subtask:</strong> {swarmSubtasks[activeAgentTab]}
+                </div>
+              )}
+
+              {/* Active agent's events */}
+              {swarmAgents[activeAgentTab]?.events.map((e, i) => <EventRow key={i} event={e} />)}
+
+              {/* Active agent's result */}
+              {swarmAgents[activeAgentTab]?.result && (
+                <div style={{ marginTop: "0.5rem", padding: "0.5rem", background: swarmAgents[activeAgentTab].result.success ? "rgba(35, 134, 54, 0.1)" : "rgba(248, 81, 73, 0.1)", borderRadius: "var(--radius)", borderLeft: `3px solid ${swarmAgents[activeAgentTab].result.success ? "#238636" : "#f85149"}` }}>
+                  <div style={{ fontSize: "0.8125rem", fontWeight: 600 }}>
+                    {swarmAgents[activeAgentTab].result.success ? "✓" : "✗"} Agent {activeAgentTab + 1} {swarmAgents[activeAgentTab].result.success ? "Complete" : "Failed"}
+                  </div>
+                  <div style={{ fontSize: "0.8125rem", marginTop: "0.25rem", whiteSpace: "pre-wrap" }}>
+                    {swarmAgents[activeAgentTab].result.summary}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>

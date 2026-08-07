@@ -20,6 +20,7 @@ const createSchema = z.object({
   runtime_pref: z.enum(["local", "cloud"]).default("local"),
   repo_ref: z.string().optional(),
   model: z.string().optional(), // e.g. "anthropic:claude-3-5-sonnet-latest"
+  agent_count: z.number().int().min(1).max(5).default(1),
 });
 
 taskRoutes.use("*", authMiddleware());
@@ -42,6 +43,7 @@ taskRoutes.post("/v1/tasks", async (c) => {
       runtime_pref: body.runtime_pref,
       repo_ref: body.repo_ref,
       model: body.model,
+      agent_count: body.agent_count,
     })
     .returning();
   return c.json({ task: t[0] }, 201);
@@ -118,7 +120,60 @@ taskRoutes.post("/v1/tasks/:id/start", async (c) => {
   const keyForProvider = keys.find((k) => k.provider === modelProvider) ?? preferredKey;
   const apiKey = Buffer.from(keyForProvider.encrypted_key, "base64").toString("utf8");
 
-  // 3. Dispatch to local agent
+  // 3. Dispatch to local agent — swarm mode if agent_count > 1
+  const agentCount = t.agent_count ?? 1;
+
+  if (agentCount > 1) {
+    // Swarm mode: dispatch to /v1/agent/swarm
+    const swarmBody = {
+      spec: t.spec,
+      cwd: t.repo_ref ?? process.cwd(),
+      org_id: p.org_id,
+      agent_count: agentCount,
+      model,
+      budget_usd: parseFloat(t.budget_usd),
+      max_iterations: 20,
+      api_key: apiKey,
+    };
+
+    let swarmResp: Response;
+    try {
+      swarmResp = await fetch(`${LOCAL_AGENT_URL}/v1/agent/swarm`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(swarmBody),
+      });
+    } catch {
+      return c.json({ error: "agent_unreachable", message: "Local agent is not running." }, 502);
+    }
+
+    if (!swarmResp.ok) {
+      const errBody = await swarmResp.text();
+      return c.json({ error: "agent_error", detail: errBody }, 502);
+    }
+
+    const swarmData = await swarmResp.json() as { swarm_id: string; agent_ids: string[]; subtasks: string[] };
+
+    await db.insert(agentRun).values({
+      org_id: p.org_id,
+      user_id: p.user_id,
+      task_id: id,
+      runtime: t.runtime_pref ?? "local",
+      status: "running",
+    });
+
+    await db.update(task).set({ status: "running" }).where(eq(task.id, id));
+
+    return c.json({
+      ok: true,
+      swarm_id: swarmData.swarm_id,
+      agent_ids: swarmData.agent_ids,
+      subtasks: swarmData.subtasks,
+      agent_count: agentCount,
+    });
+  }
+
+  // Single agent mode
   const startBody = {
     spec: t.spec,
     cwd: t.repo_ref ?? process.cwd(),
@@ -186,6 +241,37 @@ taskRoutes.get("/v1/tasks/:id/events", async (c) => {
       await db.update(task).set({ status: "failed" }).where(eq(task.id, id));
     } else if (data.status === "killed") {
       await db.update(task).set({ status: "killed" }).where(eq(task.id, id));
+    }
+
+    return c.json(data);
+  } catch {
+    return c.json({ error: "agent_unreachable" }, 502);
+  }
+});
+
+/** Get swarm events for a task (polls local agent for all agents in the swarm). */
+taskRoutes.get("/v1/tasks/:id/swarm-events", async (c) => {
+  const p = c.get("principal")!;
+  const id = c.req.param("id");
+  const swarmId = c.req.query("swarm_id");
+  if (!swarmId) return c.json({ error: "swarm_id required" }, 400);
+
+  const db = getDb();
+  const taskRows = await db.select().from(task).where(and(eq(task.id, id), eq(task.org_id, p.org_id))).limit(1);
+  if (taskRows.length === 0) return c.json({ error: "not_found" }, 404);
+
+  try {
+    const resp = await fetch(`${LOCAL_AGENT_URL}/v1/agent/swarm/${swarmId}`);
+    if (!resp.ok) return c.json({ error: "swarm_not_found" }, 404);
+    const data = await resp.json() as {
+      status: string;
+      subtasks: string[];
+      agents: Array<{ id: string; status: string; events: Array<Record<string, unknown>>; result?: { summary: string; costUsd: number; iterations: number; success: boolean } }>;
+    };
+
+    // Sync task status when all agents are done
+    if (data.status === "complete") {
+      await db.update(task).set({ status: "complete" }).where(eq(task.id, id));
     }
 
     return c.json(data);

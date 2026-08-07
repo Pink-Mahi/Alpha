@@ -35,6 +35,7 @@ export function Tasks() {
   const [budgetUsd, setBudgetUsd] = useState("2.00");
   const [runtimePref, setRuntimePref] = useState("local");
   const [selectedModel, setSelectedModel] = useState("");
+  const [agentCount, setAgentCount] = useState(1);
   const [providers, setProviders] = useState<ProviderGroup[]>([]);
   const [hasAnyKey, setHasAnyKey] = useState(false);
   const [error, setError] = useState("");
@@ -88,6 +89,7 @@ export function Tasks() {
           budget_usd: parseFloat(budgetUsd),
           runtime_pref: runtimePref,
           model: selectedModel || undefined,
+          agent_count: agentCount,
         }),
       });
       const data = await resp.json();
@@ -164,6 +166,22 @@ export function Tasks() {
               <div>
                 <label className="muted" style={{ fontSize: "0.75rem", display: "block", marginBottom: "0.25rem" }}>Budget (USD)</label>
                 <input type="number" step="0.50" min="0.50" max="100" value={budgetUsd} onChange={(e) => setBudgetUsd(e.target.value)} required />
+              </div>
+            </div>
+            <div>
+              <label className="muted" style={{ fontSize: "0.75rem", display: "block", marginBottom: "0.25rem" }}>
+                Agents {agentCount > 1 && <span style={{ color: "#1f6feb" }}>— Swarm mode: task will be decomposed into {agentCount} subtasks</span>}
+              </label>
+              <div style={{ display: "flex", gap: "0.4rem" }}>
+                {[1, 2, 3, 4, 5].map((n) => (
+                  <button
+                    key={n}
+                    type="button"
+                    className={agentCount === n ? "btn" : "btn btn-secondary"}
+                    style={{ width: "2.5rem", padding: "0.3rem", fontSize: "0.8125rem" }}
+                    onClick={() => setAgentCount(n)}
+                  >{n}</button>
+                ))}
               </div>
             </div>
             <button type="submit" className="btn" disabled={creating || !hasAnyKey}>
