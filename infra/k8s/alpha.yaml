@@ -1,24 +1,24 @@
-# Kubernetes manifests for Cascade production deployment.
+# Kubernetes manifests for ALPHA production deployment.
 # Apply with: kubectl apply -f infra/k8s/
 #
 # Prerequisites:
 # - EKS cluster with gVisor (runsc) runtime class for cloud-agent sandboxes
 # - PostgreSQL (RDS) + Redis (ElastiCache) provisioned via Terraform
-# - Secrets created: kubectl create secret generic cascade-secrets --from-literal=...
+# - Secrets created: kubectl create secret generic ALPHA-secrets --from-literal=...
 
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: cascade
+  name: ALPHA
   labels:
-    app.kubernetes.io/part-of: cascade
+    app.kubernetes.io/part-of: ALPHA
 ---
 # --- Control Plane ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: control-plane
-  namespace: cascade
+  namespace: ALPHA
   labels:
     app: control-plane
 spec:
@@ -42,17 +42,17 @@ spec:
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
-                  name: cascade-secrets
+                  name: ALPHA-secrets
                   key: database-url
             - name: JWT_SECRET
               valueFrom:
                 secretKeyRef:
-                  name: cascade-secrets
+                  name: ALPHA-secrets
                   key: jwt-secret
             - name: STRIPE_SECRET_KEY
               valueFrom:
                 secretKeyRef:
-                  name: cascade-secrets
+                  name: ALPHA-secrets
                   key: stripe-secret-key
           resources:
             requests:
@@ -78,7 +78,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: control-plane
-  namespace: cascade
+  namespace: ALPHA
 spec:
   selector:
     app: control-plane
@@ -91,7 +91,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: model-router
-  namespace: cascade
+  namespace: ALPHA
   labels:
     app: model-router
 spec:
@@ -113,12 +113,12 @@ spec:
             - name: ANTHROPIC_API_KEY
               valueFrom:
                 secretKeyRef:
-                  name: cascade-secrets
+                  name: ALPHA-secrets
                   key: anthropic-api-key
             - name: OPENAI_API_KEY
               valueFrom:
                 secretKeyRef:
-                  name: cascade-secrets
+                  name: ALPHA-secrets
                   key: openai-api-key
           resources:
             requests:
@@ -138,7 +138,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: model-router
-  namespace: cascade
+  namespace: ALPHA
 spec:
   selector:
     app: model-router
@@ -151,7 +151,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: local-agent
-  namespace: cascade
+  namespace: ALPHA
   labels:
     app: local-agent
 spec:
@@ -171,7 +171,7 @@ spec:
             - containerPort: 8083
           env:
             - name: MODEL_ROUTER_URL
-              value: "http://model-router.cascade.svc.cluster.local"
+              value: "http://model-router.ALPHA.svc.cluster.local"
           resources:
             requests:
               cpu: 500m
@@ -190,7 +190,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: local-agent
-  namespace: cascade
+  namespace: ALPHA
 spec:
   selector:
     app: local-agent
@@ -203,7 +203,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: memory-service
-  namespace: cascade
+  namespace: ALPHA
   labels:
     app: memory-service
 spec:
@@ -223,7 +223,7 @@ spec:
             - containerPort: 8084
           env:
             - name: CONTROL_PLANE_URL
-              value: "http://control-plane.cascade.svc.cluster.local"
+              value: "http://control-plane.ALPHA.svc.cluster.local"
           resources:
             requests:
               cpu: 100m
@@ -236,7 +236,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: memory-service
-  namespace: cascade
+  namespace: ALPHA
 spec:
   selector:
     app: memory-service
@@ -249,7 +249,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: cloud-agent
-  namespace: cascade
+  namespace: ALPHA
   labels:
     app: cloud-agent
 spec:
@@ -272,7 +272,7 @@ spec:
             - name: GITHUB_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: cascade-secrets
+                  name: ALPHA-secrets
                   key: github-token
           resources:
             requests:
@@ -292,7 +292,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: cloud-agent
-  namespace: cascade
+  namespace: ALPHA
 spec:
   selector:
     app: cloud-agent
@@ -305,7 +305,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: voice-service
-  namespace: cascade
+  namespace: ALPHA
   labels:
     app: voice-service
 spec:
@@ -327,25 +327,25 @@ spec:
             - name: TWILIO_ACCOUNT_SID
               valueFrom:
                 secretKeyRef:
-                  name: cascade-secrets
+                  name: ALPHA-secrets
                   key: twilio-account-sid
             - name: TWILIO_AUTH_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: cascade-secrets
+                  name: ALPHA-secrets
                   key: twilio-auth-token
-            - name: TWILIO_CASCADE_NUMBER
+            - name: TWILIO_ALPHA_NUMBER
               valueFrom:
                 secretKeyRef:
-                  name: cascade-secrets
-                  key: twilio-cascade-number
+                  name: ALPHA-secrets
+                  key: twilio-ALPHA-number
             - name: OPENAI_API_KEY
               valueFrom:
                 secretKeyRef:
-                  name: cascade-secrets
+                  name: ALPHA-secrets
                   key: openai-api-key
             - name: VOICE_WEBHOOK_URL
-              value: "https://voice.cascade.dev"
+              value: "https://voice.ALPHA.dev"
           resources:
             requests:
               cpu: 200m
@@ -358,7 +358,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: voice-service
-  namespace: cascade
+  namespace: ALPHA
 spec:
   selector:
     app: voice-service
@@ -370,15 +370,15 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: cascade-ingress
-  namespace: cascade
+  name: ALPHA-ingress
+  namespace: ALPHA
   annotations:
     kubernetes.io/ingress.class: alb
     alb.ingress.kubernetes.io/scheme: internet-facing
     alb.ingress.kubernetes.io/target-type: ip
 spec:
   rules:
-    - host: api.cascade.dev
+    - host: api.ALPHA.dev
       http:
         paths:
           - path: /
@@ -388,7 +388,7 @@ spec:
                 name: control-plane
                 port:
                   number: 80
-    - host: voice.cascade.dev
+    - host: voice.ALPHA.dev
       http:
         paths:
           - path: /
@@ -404,7 +404,7 @@ apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
   name: control-plane
-  namespace: cascade
+  namespace: ALPHA
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
@@ -425,7 +425,7 @@ apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
   name: local-agent
-  namespace: cascade
+  namespace: ALPHA
 spec:
   scaleTargetRef:
     apiVersion: apps/v1

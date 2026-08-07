@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://cascade.dev/schemas/agent-protocol/payloads.json",
+  "$id": "https://ALPHA.dev/schemas/agent-protocol/payloads.json",
   "title": "AgentMessagePayloads",
   "description": "Discriminated union of payloads for each agent message type. The `type` field on the envelope selects the payload.",
   "type": "object",

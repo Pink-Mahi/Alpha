@@ -14,7 +14,7 @@ export function Billing() {
 
   useEffect(() => {
     async function fetchPlans() {
-      const token = localStorage.getItem("cascade_token");
+      const token = localStorage.getItem("ALPHA_token");
       if (!token) { window.location.href = "/login"; return; }
       try {
         const resp = await fetch("/v1/billing/plans", { headers: { Authorization: `Bearer ${token}` } });
@@ -30,7 +30,7 @@ export function Billing() {
   }, []);
 
   async function upgrade(planId: string) {
-    const token = localStorage.getItem("cascade_token");
+    const token = localStorage.getItem("ALPHA_token");
     const resp = await fetch("/v1/billing/checkout", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },

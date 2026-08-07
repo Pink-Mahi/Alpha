@@ -174,8 +174,8 @@ interface OpenAIRealtimeEvent {
   error?: { message: string };
 }
 
-/** Default system prompt for the Cascade voice agent. */
-export const DEFAULT_VOICE_PROMPT = `You are Cascade, a personal AI assistant answering a phone call. You are helpful, concise, and professional. You can:
+/** Default system prompt for the ALPHA voice agent. */
+export const DEFAULT_VOICE_PROMPT = `You are ALPHA, a personal AI assistant answering a phone call. You are helpful, concise, and professional. You can:
 - Answer questions about the user's projects, tasks, and schedule
 - Take messages and forward them via SMS or email
 - Schedule reminders

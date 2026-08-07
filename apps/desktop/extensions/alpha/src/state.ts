@@ -1,7 +1,7 @@
 /** Persistent extension state (secrets + global state + context keys). */
 import * as vscode from "vscode";
 
-const TOKEN_KEY = "cascade.token";
+const TOKEN_KEY = "ALPHA.token";
 
 export class State {
   constructor(private readonly ctx: vscode.ExtensionContext) {}
@@ -27,24 +27,24 @@ export class State {
   }
 
   get signedIn(): boolean {
-    return this.ctx.globalState.get<boolean>("cascade.signedIn") ?? false;
+    return this.ctx.globalState.get<boolean>("ALPHA.signedIn") ?? false;
   }
 
   async setSignedIn(v: boolean): Promise<void> {
-    await this.ctx.globalState.update("cascade.signedIn", v);
-    await vscode.commands.executeCommand("setContext", "cascade.signedIn", v);
+    await this.ctx.globalState.update("ALPHA.signedIn", v);
+    await vscode.commands.executeCommand("setContext", "ALPHA.signedIn", v);
   }
 
   get currentTaskId(): string | undefined {
-    return this.ctx.workspaceState.get<string>("cascade.currentTaskId");
+    return this.ctx.workspaceState.get<string>("ALPHA.currentTaskId");
   }
 
   async setCurrentTaskId(id: string | undefined): Promise<void> {
-    await this.ctx.workspaceState.update("cascade.currentTaskId", id);
-    await vscode.commands.executeCommand("setContext", "cascade.agentRunning", !!id);
+    await this.ctx.workspaceState.update("ALPHA.currentTaskId", id);
+    await vscode.commands.executeCommand("setContext", "ALPHA.agentRunning", !!id);
   }
 
   get serverUrl(): string {
-    return vscode.workspace.getConfiguration("cascade").get<string>("serverUrl") ?? "http://localhost:8080";
+    return vscode.workspace.getConfiguration("ALPHA").get<string>("serverUrl") ?? "http://localhost:8080";
   }
 }

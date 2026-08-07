@@ -1,9 +1,9 @@
 {
-  "name": "cascade-agent",
-  "displayName": "Cascade Agent",
+  "name": "ALPHA-agent",
+  "displayName": "ALPHA Agent",
   "description": "Agentic coding command center — plan, execute, review multi-file tasks with autonomous agents.",
   "version": "0.0.0",
-  "publisher": "dev.cascade",
+  "publisher": "dev.ALPHA",
   "engines": {
     "vscode": "^1.99.0"
   },
@@ -14,16 +14,16 @@
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "cascade",
-          "title": "Cascade",
-          "icon": "media/cascade-icon.svg"
+          "id": "ALPHA",
+          "title": "ALPHA",
+          "icon": "media/ALPHA-icon.svg"
         }
       ]
     },
     "views": {
-      "cascade": [
+      "ALPHA": [
         {
-          "id": "cascade.commandCenter",
+          "id": "ALPHA.commandCenter",
           "name": "Command Center",
           "type": "webview"
         }
@@ -31,56 +31,56 @@
     },
     "commands": [
       {
-        "command": "cascade.newTask",
-        "title": "Cascade: New Task",
-        "category": "Cascade"
+        "command": "ALPHA.newTask",
+        "title": "ALPHA: New Task",
+        "category": "ALPHA"
       },
       {
-        "command": "cascade.openCommandCenter",
-        "title": "Cascade: Open Command Center",
-        "category": "Cascade"
+        "command": "ALPHA.openCommandCenter",
+        "title": "ALPHA: Open Command Center",
+        "category": "ALPHA"
       },
       {
-        "command": "cascade.pauseAgent",
-        "title": "Cascade: Pause Agent",
-        "category": "Cascade"
+        "command": "ALPHA.pauseAgent",
+        "title": "ALPHA: Pause Agent",
+        "category": "ALPHA"
       },
       {
-        "command": "cascade.killAgent",
-        "title": "Cascade: Kill Agent",
-        "category": "Cascade"
+        "command": "ALPHA.killAgent",
+        "title": "ALPHA: Kill Agent",
+        "category": "ALPHA"
       },
       {
-        "command": "cascade.signIn",
-        "title": "Cascade: Sign In",
-        "category": "Cascade"
+        "command": "ALPHA.signIn",
+        "title": "ALPHA: Sign In",
+        "category": "ALPHA"
       }
     ],
     "configuration": {
-      "title": "Cascade",
+      "title": "ALPHA",
       "properties": {
-        "cascade.serverUrl": {
+        "ALPHA.serverUrl": {
           "type": "string",
           "default": "http://localhost:8080",
-          "description": "Cascade control plane URL."
+          "description": "ALPHA control plane URL."
         },
-        "cascade.agentRuntimeUrl": {
+        "ALPHA.agentRuntimeUrl": {
           "type": "string",
           "default": "http://localhost:8083",
-          "description": "Cascade local agent runtime URL."
+          "description": "ALPHA local agent runtime URL."
         },
-        "cascade.apiKey": {
+        "ALPHA.apiKey": {
           "type": "string",
           "default": "",
-          "description": "Cascade API key (or use the Sign In command)."
+          "description": "ALPHA API key (or use the Sign In command)."
         },
-        "cascade.defaultRuntime": {
+        "ALPHA.defaultRuntime": {
           "type": "string",
           "enum": ["local", "cloud"],
           "default": "local",
           "description": "Default agent runtime for new tasks."
         },
-        "cascade.budgetUSD": {
+        "ALPHA.budgetUSD": {
           "type": "number",
           "default": 2.0,
           "description": "Default per-task budget cap in USD."
@@ -90,16 +90,16 @@
     "menus": {
       "commandPalette": [
         {
-          "command": "cascade.newTask",
-          "when": "cascade.signedIn"
+          "command": "ALPHA.newTask",
+          "when": "ALPHA.signedIn"
         },
         {
-          "command": "cascade.pauseAgent",
-          "when": "cascade.agentRunning"
+          "command": "ALPHA.pauseAgent",
+          "when": "ALPHA.agentRunning"
         },
         {
-          "command": "cascade.killAgent",
-          "when": "cascade.agentRunning"
+          "command": "ALPHA.killAgent",
+          "when": "ALPHA.agentRunning"
         }
       ]
     }

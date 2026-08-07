@@ -1,5 +1,5 @@
 {
-  "name": "@cascade/cloud-agent",
+  "name": "@alpha/cloud-agent",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -12,7 +12,7 @@
     "lint": "echo 'lint TODO' && exit 0"
   },
   "dependencies": {
-    "@cascade/agent-protocol": "workspace:*",
+    "@alpha/agent-protocol": "workspace:*",
     "hono": "^4.6.10",
     "zod": "^3.23.8"
   },

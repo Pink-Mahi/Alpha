@@ -1,5 +1,5 @@
 /**
- * Command Center — the main Cascade webview panel in the activity bar.
+ * Command Center — the main ALPHA webview panel in the activity bar.
  *
  * Shows: sign-in state, current task status, agent log stream, and a prompt
  * input for new tasks. Communicates with the extension via message passing.
@@ -50,7 +50,7 @@ export class CommandCenterProvider implements vscode.WebviewViewProvider {
           break;
         }
         case "signIn": {
-          await vscode.commands.executeCommand("cascade.signIn");
+          await vscode.commands.executeCommand("ALPHA.signIn");
           break;
         }
         case "refresh": {
@@ -125,7 +125,7 @@ export class CommandCenterProvider implements vscode.WebviewViewProvider {
   <meta charset="UTF-8" />
   <meta http-equiv="Content-Security-Policy" content="${csp}" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Cascade Command Center</title>
+  <title>ALPHA Command Center</title>
   <style>
     body { font-family: var(--vscode-font-family); color: var(--vscode-foreground); padding: 12px; margin: 0; }
     h2 { font-size: 13px; font-weight: 600; margin: 0 0 8px 0; text-transform: uppercase; opacity: 0.7; }
@@ -151,10 +151,10 @@ export class CommandCenterProvider implements vscode.WebviewViewProvider {
   </style>
 </head>
 <body>
-  <h2>Cascade</h2>
+  <h2>ALPHA</h2>
 
   <div id="signedOut">
-    <p class="muted">Sign in to start using Cascade agents.</p>
+    <p class="muted">Sign in to start using ALPHA agents.</p>
     <button class="btn" id="signInBtn">Sign In</button>
   </div>
 

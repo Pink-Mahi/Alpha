@@ -1,4 +1,4 @@
-# Cascade Platform — Agent Rules
+# ALPHA Platform — Agent Rules
 
 ## Project
 Commercial agentic dev platform + personal AI agent + real-time phone answering service.
@@ -33,7 +33,7 @@ Realtime/xAI). Multi-tenant SaaS, BYO-key-first pricing, bootstrapped, 2–3 per
 - No secrets in code; env via `.env` (gitignored) or KMS/OS keychain.
 - Agent protocol changes: update `shared/agent-protocol/schema/*.json` AND the hand-authored
   TS (`shared/agent-protocol/ts/src/index.ts`) AND Python
-  (`shared/agent-protocol/python/src/cascade_agent_protocol/__init__.py`). Codegen later.
+  (`shared/agent-protocol/python/src/ALPHA_agent_protocol/__init__.py`). Codegen later.
 - New architectural decisions: add an ADR in `docs/adr/` and update its README index.
 - Pre-commit: no secrets; `bun run typecheck` clean; `uv run ruff check` clean for changed Py.
 - Do NOT apply Terraform (`terraform apply`) without explicit human confirmation.

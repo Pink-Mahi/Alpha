@@ -13,7 +13,7 @@ export function Dashboard() {
 
   useEffect(() => {
     async function fetchUsage() {
-      const token = localStorage.getItem("cascade_token");
+      const token = localStorage.getItem("ALPHA_token");
       if (!token) {
         window.location.href = "/login";
         return;

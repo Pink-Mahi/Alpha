@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-  <!-- Cascade icon: three converging streams into a point -->
+  <!-- ALPHA icon: three converging streams into a point -->
   <path d="M4 4 L12 12 L4 20" />
   <path d="M12 4 L12 12 L12 20" opacity="0.6" />
   <path d="M20 4 L12 12 L20 20" opacity="0.4" />

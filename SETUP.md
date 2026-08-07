@@ -1,6 +1,6 @@
-# Cascade — Local Setup Guide
+# ALPHA — Local Setup Guide
 
-This guide gets the Cascade platform running locally for beta testing.
+This guide gets the ALPHA platform running locally for beta testing.
 
 ## Prerequisites
 
@@ -44,7 +44,7 @@ cp services/control-plane/.env.example services/control-plane/.env
 ```
 
 Edit `.env` and set:
-- `DATABASE_URL=postgres://cascade:cascade@localhost:5432/cascade`
+- `DATABASE_URL=postgres://ALPHA:ALPHA@localhost:5432/ALPHA`
 - `JWT_SECRET=<any random string>`
 - `STRIPE_SECRET_KEY=sk_test_...` (your Stripe test key — optional, billing degrades gracefully)
 - `STRIPE_WEBHOOK_SECRET=whsec_...` (your Stripe webhook secret — optional)
@@ -77,7 +77,7 @@ Verify: `curl http://localhost:8080/healthz` should return `{"ok":true}`
 ```bash
 cd apps/desktop
 bun scripts/build.ts    # compile VS Code (takes ~10 min first time)
-bun scripts/run.ts      # launch the Cascade IDE
+bun scripts/run.ts      # launch the ALPHA IDE
 ```
 
 Or for dev mode (faster, no full packaging):
@@ -86,10 +86,10 @@ cd apps/desktop/vscode
 yarn electron
 ```
 
-## Step 7: Use the Cascade IDE
+## Step 7: Use the ALPHA IDE
 
-1. Open the Cascade activity bar icon (left sidebar)
-2. Run command "Cascade: Sign In" — paste your API token
+1. Open the ALPHA activity bar icon (left sidebar)
+2. Run command "ALPHA: Sign In" — paste your API token
    - To get a token: `POST http://localhost:8080/v1/auth/signup` with email/password/org_name
 3. Enter a coding task in the Command Center prompt
 4. Watch the agent execute (read files, edit, run tests) in the event log
@@ -119,7 +119,7 @@ Set the `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` env var for the model router to 
 ## Architecture overview
 
 ```
-User → VS Code Fork (Cascade IDE)
+User → VS Code Fork (ALPHA IDE)
          ↓ (extension calls)
     Local Agent Runtime (port 8083)
          ↓ (LLM calls)
@@ -129,7 +129,7 @@ User → VS Code Fork (Cascade IDE)
          ↓ (tool results)
     Local Agent Runtime → edits files, runs commands
          ↓ (events)
-    Cascade IDE Command Center (live log)
+    ALPHA IDE Command Center (live log)
          ↓ (sync)
     Control Plane (port 8080) ← auth, billing, tasks, usage
     Memory Service (port 8084) ← local cache + cloud sync

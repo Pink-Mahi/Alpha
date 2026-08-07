@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * dev-launcher.ts — starts all Cascade services for local development.
+ * dev-launcher.ts — starts all ALPHA services for local development.
  *
  * Starts (in order):
  *   1. Control plane (port 8080)
@@ -28,7 +28,7 @@ const services = [
   {
     name: "model-router",
     port: 8081,
-    cmd: ["python", "-m", "uvicorn", "cascade_model_router.app:app", "--port", "8081"],
+    cmd: ["python", "-m", "uvicorn", "ALPHA_model_router.app:app", "--port", "8081"],
     cwd: "services/model-router",
     env: {},
   },
@@ -48,7 +48,7 @@ const services = [
 
 const procs: Array<{ name: string; proc: ReturnType<typeof spawn> }> = [];
 
-console.log("=== Cascade Dev Launcher ===\n");
+console.log("=== ALPHA Dev Launcher ===\n");
 
 for (const svc of services) {
   console.log(`Starting ${svc.name} on port ${svc.port}...`);

@@ -236,8 +236,8 @@ marketplaceRoutes.get("/v1/marketplace/revenue", (c) => {
   return c.json({
     ...stats,
     revenue_share_author: 0.7,
-    revenue_share_cascade: 0.3,
-    note: "Revenue share is 70% author, 30% Cascade. Payouts via Stripe Connect.",
+    revenue_share_ALPHA: 0.3,
+    note: "Revenue share is 70% author, 30% ALPHA. Payouts via Stripe Connect.",
   });
 });
 
@@ -270,7 +270,7 @@ marketplaceRoutes.post("/v1/marketplace/connect/onboard", async (c) => {
   } else {
     // We need the user's email — in production, fetch from DB.
     // For now, use a placeholder since we don't have DB access here.
-    const result = await connectClient.createExpressAccount(`user-${p.user_id}@cascade.dev`);
+    const result = await connectClient.createExpressAccount(`user-${p.user_id}@ALPHA.dev`);
     accountId = result.accountId;
     connectAccounts.set(p.user_id, { stripeAccountId: accountId, status: "pending" });
   }

@@ -2,7 +2,7 @@
  * Twilio phone integration — inbound/outbound calls via Twilio.
  *
  * Flow:
- * 1. User gets a Cascade phone number (provisioned via Twilio)
+ * 1. User gets a ALPHA phone number (provisioned via Twilio)
  * 2. Caller dials the number → Twilio webhook → our /v1/voice/inbound
  * 3. We connect the call to OpenAI Realtime API via Twilio Media Streams (WSS)
  * 4. Realtime API handles conversation (speech-to-text → LLM → text-to-speech)
@@ -14,8 +14,8 @@
 export interface TwilioConfig {
   accountSid: string;
   authToken: string;
-  /** The Twilio phone number purchased for Cascade (E.164 format). */
-  cascadeNumber: string;
+  /** The Twilio phone number purchased for ALPHA (E.164 format). */
+  ALPHANumber: string;
   /** The URL Twilio should hit for voice webhooks (our public URL). */
   webhookBaseUrl: string;
 }
@@ -49,7 +49,7 @@ export class TwilioClient {
   generateConnectTwiml(streamUrl: string): string {
     return `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Say voice="Polly.Joanna-Neural">Hi, this is Cascade. How can I help you?</Say>
+  <Say voice="Polly.Joanna-Neural">Hi, this is ALPHA. How can I help you?</Say>
   <Connect>
     <Stream url="${streamUrl}" />
   </Connect>
@@ -111,7 +111,7 @@ export class TwilioClient {
   async makeCall(to: string, twimlUrl: string): Promise<{ callSid: string }> {
     const params = new URLSearchParams({
       To: to,
-      From: this.config.cascadeNumber,
+      From: this.config.ALPHANumber,
       Url: twimlUrl,
     });
     const resp = await fetch(
@@ -131,7 +131,7 @@ export class TwilioClient {
   async sendSms(to: string, body: string): Promise<{ messageSid: string }> {
     const params = new URLSearchParams({
       To: to,
-      From: this.config.cascadeNumber,
+      From: this.config.ALPHANumber,
       Body: body,
     });
     const resp = await fetch(

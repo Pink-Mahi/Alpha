@@ -141,7 +141,7 @@ export class EmailChannel implements MessageChannel {
         body: JSON.stringify({
           from: this.fromEmail,
           to: opts.to,
-          subject: opts.subject ?? "Cascade notification",
+          subject: opts.subject ?? "ALPHA notification",
           text: opts.body,
         }),
       });
@@ -203,7 +203,7 @@ export class MessagingService {
     }
 
     const resendKey = process.env.RESEND_API_KEY;
-    const resendFrom = process.env.RESEND_FROM_EMAIL ?? "agent@cascade.dev";
+    const resendFrom = process.env.RESEND_FROM_EMAIL ?? "agent@ALPHA.dev";
     if (resendKey && !resendKey.includes("placeholder")) {
       svc.register("email", new EmailChannel(resendKey, resendFrom));
     }

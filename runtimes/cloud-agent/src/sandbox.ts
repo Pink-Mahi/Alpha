@@ -79,9 +79,9 @@ export class DockerSandboxRuntime implements ISandboxRuntime {
 
     // TODO: actual Docker/K8s integration
     // For now, simulate setup:
-    // 1. docker run -d --name cascade-{id} -m {memory} --cpus {cpu} ubuntu:22.04 sleep infinity
-    // 2. docker exec cascade-{id} git clone {repoUrl} /workspace
-    // 3. docker exec cascade-{id} cd /workspace && git checkout {ref}
+    // 1. docker run -d --name ALPHA-{id} -m {memory} --cpus {cpu} ubuntu:22.04 sleep infinity
+    // 2. docker exec ALPHA-{id} git clone {repoUrl} /workspace
+    // 3. docker exec ALPHA-{id} cd /workspace && git checkout {ref}
 
     sandbox.status = "ready";
 
@@ -96,7 +96,7 @@ export class DockerSandboxRuntime implements ISandboxRuntime {
 
   async exec(sandbox: Sandbox, command: string): Promise<SandboxExecResult> {
     console.log(`[sandbox:${sandbox.id}] exec: ${command.slice(0, 100)}`);
-    // TODO: docker exec cascade-{id} sh -c "{command}"
+    // TODO: docker exec ALPHA-{id} sh -c "{command}"
     return { stdout: "[sandbox stub: command executed]", stderr: "", exitCode: 0 };
   }
 
@@ -116,10 +116,10 @@ export class DockerSandboxRuntime implements ISandboxRuntime {
     console.log(`[sandbox:${sandbox.id}] snapshotting (git commit + push branch)`);
     // TODO:
     // 1. docker exec git add -A
-    // 2. docker exec git commit -m "Cascade: {task title}"
-    // 3. docker exec git push origin cascade/{taskId}
+    // 2. docker exec git commit -m "ALPHA: {task title}"
+    // 3. docker exec git push origin ALPHA/{taskId}
     // 4. Return branch name + commit SHA
-    const branch = `cascade/${sandbox.id}`;
+    const branch = `ALPHA/${sandbox.id}`;
     const commitSha = "stub-commit-sha";
     sandbox.status = "ready";
     return { branch, commitSha };
@@ -129,7 +129,7 @@ export class DockerSandboxRuntime implements ISandboxRuntime {
     if (sandbox.ttlTimer) clearTimeout(sandbox.ttlTimer);
     sandbox.status = "destroyed";
     console.log(`[sandbox:${sandbox.id}] destroyed`);
-    // TODO: docker rm -f cascade-{id}
+    // TODO: docker rm -f ALPHA-{id}
     this.sandboxes.delete(sandbox.id);
   }
 

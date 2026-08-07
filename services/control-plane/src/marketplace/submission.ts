@@ -4,7 +4,7 @@
  * Extends the curated catalog with:
  * - Open submission: any org can submit a skill
  * - Review pipeline: submitted → in_review → approved/rejected
- * - Revenue share: 70% to skill author, 30% to Cascade (per ADR-0009)
+ * - Revenue share: 70% to skill author, 30% to ALPHA (per ADR-0009)
  * - Install tracking: counts + revenue per install
  *
  * M3: submission + review. Revenue share accounting (actual payouts via
@@ -36,7 +36,7 @@ export interface SkillSubmission {
   readme: string;
   /** Pricing: 0 = free, >0 = monthly price in USD. */
   priceMonthly: number;
-  /** Revenue share: 70% author, 30% Cascade. */
+  /** Revenue share: 70% author, 30% ALPHA. */
   revenueShareAuthor: number; // 0.7
   /** Review notes (set by reviewer). */
   reviewNotes?: string;
@@ -143,7 +143,7 @@ export class SubmissionManager {
   getAuthorStats(submitterId: string): {
     totalRevenue: number;
     authorRevenue: number;
-    cascadeRevenue: number;
+    ALPHARevenue: number;
     totalInstalls: number;
     submissionCount: number;
   } {
@@ -152,7 +152,7 @@ export class SubmissionManager {
     return {
       totalRevenue,
       authorRevenue: totalRevenue * 0.7,
-      cascadeRevenue: totalRevenue * 0.3,
+      ALPHARevenue: totalRevenue * 0.3,
       totalInstalls: authorSubs.reduce((sum, s) => sum + s.installCount, 0),
       submissionCount: authorSubs.length,
     };

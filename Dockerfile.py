@@ -18,4 +18,4 @@ ENV PYTHONPATH=/app/src:/app/shared/agent-protocol/python/src
 
 EXPOSE 8081
 
-CMD ["uv", "run", "uvicorn", "cascade_model_router.app:app", "--host", "0.0.0.0", "--port", "8081"]
+CMD ["uv", "run", "uvicorn", "ALPHA_model_router.app:app", "--host", "0.0.0.0", "--port", "8081"]

@@ -10,7 +10,7 @@ import { fsRead, fsWrite, fsList, searchGrep, searchFiles, registerBuiltinTools 
 let testDir: string;
 
 async function setupTestDir(): Promise<string> {
-  const dir = join(tmpdir(), `cascade-test-${randomUUID()}`);
+  const dir = join(tmpdir(), `ALPHA-test-${randomUUID()}`);
   await mkdir(dir, { recursive: true });
   await mkdir(join(dir, "subdir"), { recursive: true });
   await writeFile(join(dir, "hello.txt"), "Hello, World!");

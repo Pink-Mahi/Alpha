@@ -16,7 +16,7 @@ export const dailySummary: SkillManifest = {
   name: "daily-summary",
   version: "0.1.0",
   description: "Morning digest: summarizes git commits, agent tasks, and messages from the previous day.",
-  author: "Cascade",
+  author: "ALPHA",
   permissions: ["git.read", "fs.read", "memory.read", "message.send"],
   heartbeats: [
     {
@@ -41,7 +41,7 @@ export const codeWatcher: SkillManifest = {
   name: "code-watcher",
   version: "0.1.0",
   description: "Watches for file changes in configured directories and can trigger agent tasks on change.",
-  author: "Cascade",
+  author: "ALPHA",
   permissions: ["fs.read", "fs.watch", "agent.start"],
   heartbeats: [
     {
@@ -66,7 +66,7 @@ export const reminder: SkillManifest = {
   name: "reminder",
   version: "0.1.0",
   description: "Simple reminder system. Set reminders via chat/message and get notified at the scheduled time.",
-  author: "Cascade",
+  author: "ALPHA",
   permissions: ["memory.read", "memory.write", "message.send"],
   heartbeats: [
     {
@@ -90,7 +90,7 @@ export const gitMonitor: SkillManifest = {
   name: "git-monitor",
   version: "0.1.0",
   description: "Monitors git repos for uncommitted changes and reminds you to commit.",
-  author: "Cascade",
+  author: "ALPHA",
   permissions: ["git.read", "message.send"],
   heartbeats: [
     {
@@ -114,8 +114,8 @@ export const gitMonitor: SkillManifest = {
 export const costMonitor: SkillManifest = {
   name: "cost-monitor",
   version: "0.1.0",
-  description: "Alerts when your Cascade usage spending approaches plan limits.",
-  author: "Cascade",
+  description: "Alerts when your ALPHA usage spending approaches plan limits.",
+  author: "ALPHA",
   permissions: ["usage.read", "message.send"],
   heartbeats: [
     {

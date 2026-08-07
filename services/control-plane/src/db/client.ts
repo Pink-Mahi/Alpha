@@ -7,7 +7,7 @@ import postgres from "postgres";
 
 import * as schema from "./schema.ts";
 
-const url = process.env.DATABASE_URL ?? "postgres://postgres:postgres@localhost:5432/cascade";
+const url = process.env.DATABASE_URL ?? "postgres://postgres:postgres@localhost:5432/ALPHA";
 
 // Lazy: don't connect on import in tests that don't need DB.
 let _client: ReturnType<typeof postgres> | null = null;

@@ -1,9 +1,9 @@
 openapi: 3.1.0
 info:
-  title: Cascade Control Plane API
+  title: ALPHA Control Plane API
   version: 0.1.0
   description: |
-    The Cascade control plane handles authentication, organization management,
+    The ALPHA control plane handles authentication, organization management,
     BYO-key storage, task tracking, usage metering, Stripe billing, and the
     skills marketplace.
 
@@ -14,7 +14,7 @@ info:
 servers:
   - url: http://localhost:8080
     description: Local development
-  - url: https://api.cascade.dev
+  - url: https://api.ALPHA.dev
     description: Production
 
 components:

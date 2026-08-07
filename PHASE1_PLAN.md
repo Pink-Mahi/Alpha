@@ -1,5 +1,5 @@
 # Phase 1 — Planning Document
-# Project: "Cascade" (working name) — Commercial Agentic Dev Platform + Personal Agent + Phone AI
+# Project: "ALPHA" (working name) — Commercial Agentic Dev Platform + Personal Agent + Phone AI
 
 > **Phase 0 rule in effect:** No production code, repository scaffolding, or implementation
 > until this document is reviewed, open questions answered, and explicit approval given.
@@ -57,7 +57,7 @@ one account, one bill, your data stays yours."*
 ### 2.1 Core coding agent capabilities
 - Deep codebase indexing & semantic retrieval (repo graph, symbol table, embeddings).
 - Multi-file planning: task → plan → diff preview → execute → verify (test/lint/build loop).
-- Inline agentic IDE (VS Code fork or extension) with Cascade-style command center.
+- Inline agentic IDE (VS Code fork or extension) with ALPHA-style command center.
 - Tool use: file edit, shell, browser, search, git, test runner, package manager.
 - Model routing: support multiple providers (Anthropic, OpenAI, xAI, Google, local/Ollama).
 - Long-context + memory of past sessions per repo.
@@ -395,7 +395,7 @@ Ranked by importance (1 = blocks starting design).
 12. **Marketplace timing.** Skills/voice-persona marketplace at V1 or V2? Rev-share rate?
 13. **Funding/runway constraints.** Bootstrapped (forces profitability-first, thinner MVP) or
     funded (allows loss-leading growth)? Affects pricing & roadmap aggressiveness.
-14. **Brand/name.** "Cascade" is a placeholder (conflicts with Windsurf's feature). Final name?
+14. **Brand/name.** "ALPHA" is a placeholder (conflicts with Windsurf's feature). Final name?
 15. **Team/hiring.** Solo + contractors, or a founding team? Affects what we can build by when.
 
 ---
@@ -503,7 +503,7 @@ before Phase 2 begins.
 | 12 | Open source | **Fully closed** | Maximum IP control. Minor philosophical tension with the OpenClaw local-first/open ethos, but defensible for a commercial bootstrapped product; community/marketplace trust must be earned via transparency + audit logs instead of source openness. |
 | 13 | Memory sync default | **Cloud sync ON by default** (opt-out per project) | Better cross-device UX, stronger retention, more COGS, weaker default privacy. Opt-out preserves the privacy story for those who want it. |
 | 14 | Marketplace timing | **At launch (V1)** | Community/trust flywheel earlier. Adds review-infrastructure + curation burden at launch on top of an already ambitious bootstrapped scope — flagged as a risk; mitigated by launching with a small curated set + slow rollout of third-party publishing. |
-| 15 | Product name | **Propose candidates in Phase 2** | "Cascade" is a placeholder and conflicts with Windsurf's agent name; must change before launch. |
+| 15 | Product name | **Propose candidates in Phase 2** | "ALPHA" is a placeholder and conflicts with Windsurf's agent name; must change before launch. |
 
 ### Final reconciliation state (2026-08-07): APPROVED FOR PHASE 2
 All 15 open questions resolved. Plan is internally consistent. Human gave explicit "go" for

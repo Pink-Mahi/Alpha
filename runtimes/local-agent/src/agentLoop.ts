@@ -11,7 +11,7 @@
  *
  * M1: single-agent, no swarm, no checkpointing yet. Those land in M3.
  */
-import type { AgentMessageEnvelope, Payload } from "@cascade/agent-protocol";
+import type { AgentMessageEnvelope, Payload } from "@alpha/agent-protocol";
 
 import type { ToolBus, ToolContext } from "./toolBus.js";
 import type { ModelRouterClient } from "./modelRouterClient.js";
@@ -42,7 +42,7 @@ export interface AgentLoopResult {
   success: boolean;
 }
 
-const SYSTEM_PROMPT = `You are Cascade, an autonomous coding agent. You work inside a developer's repository and complete coding tasks by:
+const SYSTEM_PROMPT = `You are ALPHA, an autonomous coding agent. You work inside a developer's repository and complete coding tasks by:
 1. Reading files to understand the codebase
 2. Planning your approach
 3. Editing files and running commands

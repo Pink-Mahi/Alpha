@@ -276,7 +276,7 @@ rendered as a yes/no voice prompt. Tool latency > 2s triggers a "let me check th
 - **Audit:** immutable append-only audit log for every agent action, tool call, permission grant,
   billing event. User/admin can read; tamper-evident via hash chain.
 - **Secrets in code:** none. All secrets via env/KMS/OS keychain. Pre-commit hook scans for secrets.
-- **GDPR:** export endpoint (full org data dump) + delete endpoint (cascade + key destruction).
+- **GDPR:** export endpoint (full org data dump) + delete endpoint (ALPHA + key destruction).
 
 ---
 
@@ -344,7 +344,7 @@ convergence. Each milestone ends with something demoable + chargeable.
 ### M1 — Coding IDE (local) (weeks 4–8) → **first chargeable beta**
 - VS Code fork build pipeline + our extension package.
 - Local agent runtime (TS) + tool bus (file/shell/git/search).
-- Cascade-style command center panel in IDE.
+- ALPHA-style command center panel in IDE.
 - Memory service (local cache + cloud sync on by default).
 - Stripe Billing: Free + Pro (BYO-key-first, low price).
 - **Chargeable beta opens:** coding IDE + local agent, Pro tier.

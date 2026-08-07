@@ -1,5 +1,5 @@
 /**
- * run.ts — launch the built Cascade desktop app for local dev.
+ * run.ts — launch the built ALPHA desktop app for local dev.
  *
  * In dev, the simplest way to run the fork is via upstream's `yarn` launch
  * script which starts Electron with the compiled sources.
@@ -11,5 +11,5 @@ import { resolve, join } from "node:path";
 
 const vscodeDir = join(resolve(import.meta.dir, ".."), "vscode");
 
-console.log("[run] launching Cascade (yarn electron)");
+console.log("[run] launching ALPHA (yarn electron)");
 await $`yarn --cwd ${vscodeDir} electron`.nothrow();

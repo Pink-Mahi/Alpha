@@ -1,5 +1,5 @@
 /**
- * build.ts — build the Cascade desktop app from the VS Code fork.
+ * build.ts — build the ALPHA desktop app from the VS Code fork.
  *
  * Delegates to upstream's yarn scripts. Targets the desktop build.
  * On Windows: produces VS Code's standard build output.

@@ -25,7 +25,7 @@ app.use("*", logger());
 const twilioConfig: TwilioConfig = {
   accountSid: process.env.TWILIO_ACCOUNT_SID ?? "AC_placeholder",
   authToken: process.env.TWILIO_AUTH_TOKEN ?? "placeholder",
-  cascadeNumber: process.env.TWILIO_CASCADE_NUMBER ?? "+10000000000",
+  ALPHANumber: process.env.TWILIO_ALPHA_NUMBER ?? "+10000000000",
   webhookBaseUrl: process.env.VOICE_WEBHOOK_URL ?? "http://localhost:8089",
 };
 
@@ -139,7 +139,7 @@ app.post("/v1/voice/outbound", async (c) => {
   if (!body.to) return c.json({ error: "to_required" }, 400);
   try {
     // Generate TwiML URL for the outbound call
-    const twimlUrl = `${twilioConfig.webhookBaseUrl}/v1/voice/outbound-twiml?message=${encodeURIComponent(body.message ?? "Hello, this is Cascade calling.")}`;
+    const twimlUrl = `${twilioConfig.webhookBaseUrl}/v1/voice/outbound-twiml?message=${encodeURIComponent(body.message ?? "Hello, this is ALPHA calling.")}`;
     const result = await twilio.makeCall(body.to, twimlUrl);
     return c.json({ call_sid: result.callSid }, 201);
   } catch (e) {
@@ -149,7 +149,7 @@ app.post("/v1/voice/outbound", async (c) => {
 
 /** TwiML for outbound calls. */
 app.get("/v1/voice/outbound-twiml", (c) => {
-  const message = c.req.query("message") ?? "Hello, this is Cascade calling.";
+  const message = c.req.query("message") ?? "Hello, this is ALPHA calling.";
   const streamUrl = `${twilioConfig.webhookBaseUrl.replace("http://", "ws://").replace("https://", "wss://")}/v1/voice/stream/outbound-${randomUUID()}`;
   const twiml = twilio.generateOutboundTwiml(streamUrl, message);
   return c.text(twiml, 200, { "Content-Type": "text/xml" });

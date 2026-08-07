@@ -19,7 +19,7 @@ export function Marketplace() {
 
   useEffect(() => {
     async function fetchListings() {
-      const token = localStorage.getItem("cascade_token");
+      const token = localStorage.getItem("ALPHA_token");
       if (!token) { window.location.href = "/login"; return; }
       try {
         const resp = await fetch("/v1/marketplace", { headers: { Authorization: `Bearer ${token}` } });

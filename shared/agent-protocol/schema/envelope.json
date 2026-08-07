@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://cascade.dev/schemas/agent-protocol/envelope.json",
+  "$id": "https://ALPHA.dev/schemas/agent-protocol/envelope.json",
   "title": "AgentMessageEnvelope",
   "description": "Canonical envelope wrapping every agent protocol message. Uniform across local, cloud, and voice runtimes.",
   "type": "object",

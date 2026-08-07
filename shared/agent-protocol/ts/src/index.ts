@@ -1,5 +1,5 @@
 /**
- * @cascade/agent-protocol — canonical message types shared by all agent runtimes
+ * @alpha/agent-protocol — canonical message types shared by all agent runtimes
  * (local, cloud, voice) and the orchestrator.
  *
  * Types are hand-authored to match ../schema/*.json for M0. A codegen step

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://cascade.dev/schemas/agent-protocol/tool-descriptor.json",
+  "$id": "https://ALPHA.dev/schemas/agent-protocol/tool-descriptor.json",
   "title": "ToolDescriptor",
   "description": "Describes a tool capability exposed to agents. The orchestrator enforces allow-lists per agent role + skill using this metadata.",
   "type": "object",

@@ -1,7 +1,7 @@
 /**
- * Cascade Agent — VS Code extension entrypoint.
+ * ALPHA Agent — VS Code extension entrypoint.
  *
- * Registers the Cascade activity bar view container with a webview-based
+ * Registers the ALPHA activity bar view container with a webview-based
  * Command Center, plus commands for new task / pause / kill / sign in.
  *
  * M1 scope: UI shell + control plane client + task creation. Agent execution
@@ -23,24 +23,24 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
   // Register the webview provider for the Command Center panel.
   const provider = new CommandCenterProvider(ctx.extensionUri, state, client, agentClient);
   ctx.subscriptions.push(
-    vscode.window.registerWebviewViewProvider("cascade.commandCenter", provider, {
+    vscode.window.registerWebviewViewProvider("ALPHA.commandCenter", provider, {
       webviewOptions: { retainContextWhenHidden: true },
     }),
   );
 
   // Commands
   ctx.subscriptions.push(
-    vscode.commands.registerCommand("cascade.openCommandCenter", () => {
-      vscode.commands.executeCommand("cascade.commandCenter.focus");
+    vscode.commands.registerCommand("ALPHA.openCommandCenter", () => {
+      vscode.commands.executeCommand("ALPHA.commandCenter.focus");
     }),
-    vscode.commands.registerCommand("cascade.newTask", async () => {
+    vscode.commands.registerCommand("ALPHA.newTask", async () => {
       if (!state.signedIn) {
         const action = await vscode.window.showInformationMessage(
-          "Sign in to Cascade to create a task.",
+          "Sign in to ALPHA to create a task.",
           "Sign In",
         );
         if (action === "Sign In") {
-          await vscode.commands.executeCommand("cascade.signIn");
+          await vscode.commands.executeCommand("ALPHA.signIn");
         }
         return;
       }
@@ -52,8 +52,8 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
       // Start the task on the local agent runtime.
       const workspaceFolders = vscode.workspace.workspaceFolders;
       const cwd = workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
-      const model = vscode.workspace.getConfiguration("cascade").get<string>("defaultModel") ?? "anthropic:claude-3-5-sonnet-latest";
-      const budget = vscode.workspace.getConfiguration("cascade").get<number>("budgetUSD") ?? 2.0;
+      const model = vscode.workspace.getConfiguration("ALPHA").get<string>("defaultModel") ?? "anthropic:claude-3-5-sonnet-latest";
+      const budget = vscode.workspace.getConfiguration("ALPHA").get<number>("budgetUSD") ?? 2.0;
       const result = await agentClient.startTask({ spec, cwd, model, budget_usd: budget });
       if (result) {
         await state.setCurrentTaskId(result.task_id);
@@ -62,33 +62,33 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
         provider.startPolling(result.task_id);
       }
     }),
-    vscode.commands.registerCommand("cascade.pauseAgent", () => {
+    vscode.commands.registerCommand("ALPHA.pauseAgent", () => {
       provider.stopPolling();
       return client.pauseCurrentTask();
     }),
-    vscode.commands.registerCommand("cascade.killAgent", async () => {
+    vscode.commands.registerCommand("ALPHA.killAgent", async () => {
       const id = state.currentTaskId;
       if (id) await agentClient.killTask(id);
       provider.stopPolling();
       await state.setCurrentTaskId(undefined);
       provider.refresh();
     }),
-    vscode.commands.registerCommand("cascade.signIn", async () => {
+    vscode.commands.registerCommand("ALPHA.signIn", async () => {
       const token = await vscode.window.showInputBox({
-        prompt: "Paste your Cascade API token",
+        prompt: "Paste your ALPHA API token",
         password: true,
-        placeHolder: "Bearer token (from cascade.dev or /v1/auth/login)",
+        placeHolder: "Bearer token (from ALPHA.dev or /v1/auth/login)",
       });
       if (!token) return;
       state.setToken(token);
       const me = await client.getMe();
       if (me) {
         state.setSignedIn(true);
-        vscode.window.showInformationMessage(`Cascade: signed in as ${me.email}`);
+        vscode.window.showInformationMessage(`ALPHA: signed in as ${me.email}`);
         provider.refresh();
       } else {
         state.setToken("");
-        vscode.window.showErrorMessage("Cascade: sign-in failed (invalid token?)");
+        vscode.window.showErrorMessage("ALPHA: sign-in failed (invalid token?)");
       }
     }),
   );

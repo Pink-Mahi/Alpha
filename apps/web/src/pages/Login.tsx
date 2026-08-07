@@ -27,7 +27,7 @@ export function Login() {
         setError(data.error ?? "Authentication failed");
         return;
       }
-      localStorage.setItem("cascade_token", data.token);
+      localStorage.setItem("ALPHA_token", data.token);
       window.location.href = "/";
     } catch {
       setError("Network error");
@@ -39,7 +39,7 @@ export function Login() {
   return (
     <div style={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: "100vh" }}>
       <div className="card" style={{ width: 400 }}>
-        <h2>{mode === "login" ? "Log in to Cascade" : "Create your account"}</h2>
+        <h2>{mode === "login" ? "Log in to ALPHA" : "Create your account"}</h2>
         {error && <div style={{ color: "#f85149", marginBottom: "1rem", fontSize: "0.875rem" }}>{error}</div>}
         <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
           {mode === "signup" && (

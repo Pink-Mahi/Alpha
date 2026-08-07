@@ -42,7 +42,7 @@ interface RunningTask {
 const tasks = new Map<string, RunningTask>();
 
 // Re-import the type here to avoid circular deps in the emit path.
-type AgentMessageEnvelope = import("@cascade/agent-protocol").AgentMessageEnvelope;
+type AgentMessageEnvelope = import("@alpha/agent-protocol").AgentMessageEnvelope;
 
 app.get("/healthz", (c) => c.json({ ok: true, tools: bus.list().map((t) => t.name) }));
 

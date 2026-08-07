@@ -1,4 +1,4 @@
-/** Control plane client — typed REST calls to the Cascade control plane. */
+/** Control plane client — typed REST calls to the ALPHA control plane. */
 import * as vscode from "vscode";
 import type { State } from "./state";
 
@@ -32,12 +32,12 @@ export class ControlPlaneClient {
       const resp = await fetch(url, { ...init, headers });
       if (!resp.ok) {
         const body = await resp.text();
-        vscode.window.showErrorMessage(`Cascade: ${resp.status} ${body.slice(0, 200)}`);
+        vscode.window.showErrorMessage(`ALPHA: ${resp.status} ${body.slice(0, 200)}`);
         return null;
       }
       return (await resp.json()) as T;
     } catch (e) {
-      vscode.window.showErrorMessage(`Cascade: request failed — ${String(e).slice(0, 200)}`);
+      vscode.window.showErrorMessage(`ALPHA: request failed — ${String(e).slice(0, 200)}`);
       return null;
     }
   }
@@ -50,15 +50,15 @@ export class ControlPlaneClient {
   }
 
   async createTask(spec: string): Promise<TaskResponse | null> {
-    const budget = vscode.workspace.getConfiguration("cascade").get<number>("budgetUSD") ?? 2.0;
-    const runtime = vscode.workspace.getConfiguration("cascade").get<"local" | "cloud">("defaultRuntime") ?? "local";
+    const budget = vscode.workspace.getConfiguration("ALPHA").get<number>("budgetUSD") ?? 2.0;
+    const runtime = vscode.workspace.getConfiguration("ALPHA").get<"local" | "cloud">("defaultRuntime") ?? "local";
     const r = await this.request<TaskResponse>("/v1/tasks", {
       method: "POST",
       body: JSON.stringify({ title: spec.slice(0, 80), spec, budget_usd: budget, runtime_pref: runtime }),
     });
     if (r) {
       await this.state.setCurrentTaskId(r.task.id);
-      vscode.window.showInformationMessage(`Cascade: task created (${r.task.id.slice(0, 8)})`);
+      vscode.window.showInformationMessage(`ALPHA: task created (${r.task.id.slice(0, 8)})`);
     }
     return r;
   }

@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 
 from .router import ModelRouter
 
-app = FastAPI(title="cascade-model-router", version="0.0.0")
+app = FastAPI(title="ALPHA-model-router", version="0.0.0")
 router = ModelRouter()
 
 

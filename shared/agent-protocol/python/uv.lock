@@ -12,7 +12,7 @@ wheels = [
 ]
 
 [[package]]
-name = "cascade-agent-protocol"
+name = "ALPHA-agent-protocol"
 version = "0.0.0"
 source = { editable = "." }
 dependencies = [

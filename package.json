@@ -1,8 +1,8 @@
 {
-  "name": "cascade-platform",
+  "name": "ALPHA-platform",
   "version": "0.0.0",
   "private": true,
-  "description": "Commercial agentic dev platform + personal agent + phone AI (working name: Cascade, TBD).",
+  "description": "Commercial agentic dev platform + personal agent + phone AI (working name: ALPHA, TBD).",
   "packageManager": "bun@1.3.14",
   "workspaces": [
     "apps/desktop",

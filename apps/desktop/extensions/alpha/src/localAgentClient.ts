@@ -44,7 +44,7 @@ export class LocalAgentClient {
   private baseUrl: string;
 
   constructor() {
-    this.baseUrl = vscode.workspace.getConfiguration("cascade").get<string>("agentRuntimeUrl") ?? "http://localhost:8083";
+    this.baseUrl = vscode.workspace.getConfiguration("ALPHA").get<string>("agentRuntimeUrl") ?? "http://localhost:8083";
   }
 
   async startTask(req: AgentStartRequest): Promise<AgentStartResponse | null> {
@@ -55,12 +55,12 @@ export class LocalAgentClient {
         body: JSON.stringify(req),
       });
       if (!resp.ok) {
-        vscode.window.showErrorMessage(`Cascade agent: ${resp.status} ${await resp.text()}`);
+        vscode.window.showErrorMessage(`ALPHA agent: ${resp.status} ${await resp.text()}`);
         return null;
       }
       return (await resp.json()) as AgentStartResponse;
     } catch (e) {
-      vscode.window.showErrorMessage(`Cascade agent: cannot connect to runtime — ${String(e).slice(0, 200)}`);
+      vscode.window.showErrorMessage(`ALPHA agent: cannot connect to runtime — ${String(e).slice(0, 200)}`);
       return null;
     }
   }

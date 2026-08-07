@@ -137,7 +137,7 @@ export class SwarmOrchestrator {
       memoryLimit: "2g",
       ttlMinutes: 30,
       egressAllowlist: ["github.com", "registry.npmjs.org", "pypi.org"],
-      env: { CASCADE_TASK_ID: task.id, CASCADE_SUBTASK_ID: subtask.id },
+      env: { ALPHA_TASK_ID: task.id, ALPHA_SUBTASK_ID: subtask.id },
     };
 
     const sandbox = await this.sandboxRuntime.create(config);

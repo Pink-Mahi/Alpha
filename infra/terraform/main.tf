@@ -14,7 +14,7 @@ terraform {
   }
   backend "s3" {
     # Configure before init: bucket + region + key.
-    # bucket = "cascade-tfstate"
+    # bucket = "ALPHA-tfstate"
     # key    = "m0/terraform.tfstate"
     # region = "us-east-1"
   }
@@ -28,7 +28,7 @@ provider "aws" {
 
 module "vpc" {
   source = "./modules/vpc"
-  name   = "cascade-${var.env}"
+  name   = "ALPHA-${var.env}"
   region = var.aws_region
   cidr   = "10.0.0.0/16"
 }
@@ -36,7 +36,7 @@ module "vpc" {
 # --- Data plane -------------------------------------------------------------
 
 resource "aws_eks_cluster" "control" {
-  name     = "cascade-${var.env}"
+  name     = "ALPHA-${var.env}"
   role_arn = aws_iam_role.eks_cluster.arn
   vpc_config {
     subnet_ids = module.vpc.private_subnet_ids
@@ -44,7 +44,7 @@ resource "aws_eks_cluster" "control" {
 }
 
 resource "aws_iam_role" "eks_cluster" {
-  name = "cascade-eks-cluster-${var.env}"
+  name = "ALPHA-eks-cluster-${var.env}"
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
@@ -56,12 +56,12 @@ resource "aws_iam_role" "eks_cluster" {
 }
 
 resource "aws_db_instance" "postgres" {
-  identifier        = "cascade-pg-${var.env}"
+  identifier        = "ALPHA-pg-${var.env}"
   engine            = "postgres"
   engine_version    = "16.2"
   instance_class    = "db.t4g.small"
   allocated_storage = 20
-  db_name           = "cascade"
+  db_name           = "ALPHA"
   username          = "postgres"
   password          = var.db_password
   db_subnet_group_name   = module.vpc.db_subnet_group_name
@@ -71,7 +71,7 @@ resource "aws_db_instance" "postgres" {
 }
 
 resource "aws_elasticache_cluster" "redis" {
-  cluster_id           = "cascade-redis-${var.env}"
+  cluster_id           = "ALPHA-redis-${var.env}"
   engine               = "redis"
   engine_version       = "7.1"
   node_type            = "cache.t4g.micro"
@@ -81,7 +81,7 @@ resource "aws_elasticache_cluster" "redis" {
 }
 
 resource "aws_kms_key" "tenant" {
-  description             = "Cascade per-tenant data key wrapper (${var.env})"
+  description             = "ALPHA per-tenant data key wrapper (${var.env})"
   enable_key_rotation     = true
   deletion_window_in_days = 30
 }

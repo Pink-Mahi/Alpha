@@ -1,4 +1,4 @@
-# Docker Compose — full Cascade stack for local/staging.
+# Docker Compose — full ALPHA stack for local/staging.
 # Builds all services from source and connects them.
 #
 # Usage: docker compose -f docker-compose.full.yml up --build
@@ -7,13 +7,13 @@ services:
   postgres:
     image: pgvector/pgvector:pg16
     environment:
-      POSTGRES_USER: cascade
-      POSTGRES_PASSWORD: cascade
-      POSTGRES_DB: cascade
+      POSTGRES_USER: ALPHA
+      POSTGRES_PASSWORD: ALPHA
+      POSTGRES_DB: ALPHA
     ports: ["5432:5432"]
-    volumes: [cascade-pg-data:/var/lib/postgresql/data]
+    volumes: [ALPHA-pg-data:/var/lib/postgresql/data]
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U cascade"]
+      test: ["CMD-SHELL", "pg_isready -U ALPHA"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -21,7 +21,7 @@ services:
   redis:
     image: redis:7-alpine
     ports: ["6379:6379"]
-    volumes: [cascade-redis-data:/data]
+    volumes: [ALPHA-redis-data:/data]
 
   control-plane:
     build:
@@ -32,7 +32,7 @@ services:
     ports: ["8080:8080"]
     environment:
       PORT: "8080"
-      DATABASE_URL: postgres://cascade:cascade@postgres:5432/cascade
+      DATABASE_URL: postgres://ALPHA:ALPHA@postgres:5432/ALPHA
       JWT_SECRET: dev-secret-change-me
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-sk_test_placeholder}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-whsec_placeholder}
@@ -102,10 +102,10 @@ services:
       PORT: "8089"
       TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-AC_placeholder}
       TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-placeholder}
-      TWILIO_CASCADE_NUMBER: ${TWILIO_CASCADE_NUMBER:-+10000000000}
+      TWILIO_ALPHA_NUMBER: ${TWILIO_ALPHA_NUMBER:-+10000000000}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       VOICE_WEBHOOK_URL: ${VOICE_WEBHOOK_URL:-http://localhost:8089}
 
 volumes:
-  cascade-pg-data:
-  cascade-redis-data:
+  ALPHA-pg-data:
+  ALPHA-redis-data:

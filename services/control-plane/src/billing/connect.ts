@@ -7,9 +7,9 @@
  * 3. Author completes onboarding on Stripe
  * 4. When a paid skill is installed, we create a transfer to the author's
  *    Connect account (70% of the price)
- * 5. Cascade keeps 30% as platform fee
+ * 5. ALPHA keeps 30% as platform fee
  *
- * Per ADR-0009: 70% author / 30% Cascade revenue share.
+ * Per ADR-0009: 70% author / 30% ALPHA revenue share.
  */
 
 export interface ConnectConfig {

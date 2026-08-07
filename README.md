@@ -1,4 +1,4 @@
-# Cascade
+# ALPHA
 
 Agentic coding platform combining four capabilities:
 1. **Coding IDE** — VS Code fork with an integrated agent command center
@@ -36,9 +36,9 @@ cd apps/desktop && bun scripts/setup.ts && bun scripts/run.ts
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                         Cascade IDE (VS Code fork)              │
+│                         ALPHA IDE (VS Code fork)              │
 │  ┌──────────────────────────────────────────────────────────┐   │
-│  │ Cascade Extension (Command Center webview)               │   │
+│  │ ALPHA Extension (Command Center webview)               │   │
 │  │  • Task prompt → local agent runtime                     │   │
 │  │  • Live event log (tool calls, costs, file edits)        │   │
 │  │  • Sign-in, billing status, agent controls               │   │
@@ -145,7 +145,7 @@ cd services/model-router && uv run ruff check src && uv run pytest -q
 
 ```
 apps/
-  desktop/          VS Code fork + Cascade extension
+  desktop/          VS Code fork + ALPHA extension
   tray-agent/       Personal agent (heartbeats, skills, messaging)
   web/              Web dashboard (M4)
 services/

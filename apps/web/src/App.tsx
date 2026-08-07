@@ -5,7 +5,7 @@ export function App() {
     <div className="layout">
       <nav className="sidebar">
         <div style={{ fontSize: "1.25rem", fontWeight: 700, padding: "0.5rem 0.75rem", marginBottom: "1rem" }}>
-          Cascade
+          ALPHA
         </div>
         <NavLink to="/" end className={({ isActive }) => (isActive ? "active" : "")}>
           Dashboard

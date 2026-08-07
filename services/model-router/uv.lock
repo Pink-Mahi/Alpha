@@ -53,7 +53,7 @@ wheels = [
 ]
 
 [[package]]
-name = "cascade-model-router"
+name = "ALPHA-model-router"
 version = "0.0.0"
 source = { editable = "." }
 dependencies = [

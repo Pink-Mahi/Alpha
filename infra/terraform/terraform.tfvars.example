@@ -1,4 +1,4 @@
-# Cascade infra variables example. Copy to terraform.tfvars and fill in.
+# ALPHA infra variables example. Copy to terraform.tfvars and fill in.
 # DO NOT commit real values.
 
 env         = "dev"
