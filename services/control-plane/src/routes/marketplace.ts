@@ -237,6 +237,72 @@ marketplaceRoutes.get("/v1/marketplace/revenue", (c) => {
     ...stats,
     revenue_share_author: 0.7,
     revenue_share_cascade: 0.3,
-    note: "Revenue share is 70% author, 30% Cascade. Payouts via Stripe Connect (M4).",
+    note: "Revenue share is 70% author, 30% Cascade. Payouts via Stripe Connect.",
+  });
+});
+
+// --- Stripe Connect (marketplace payouts) ----------------------------------
+
+import { ConnectClient } from "../billing/connect.ts";
+
+const connectConfigured = !!process.env.STRIPE_SECRET_KEY && !!process.env.STRIPE_CLIENT_ID;
+const connectClient = connectConfigured
+  ? new ConnectClient({
+      secretKey: process.env.STRIPE_SECRET_KEY!,
+      clientId: process.env.STRIPE_CLIENT_ID!,
+      returnUrl: process.env.CONNECT_RETURN_URL ?? "http://localhost:3000/dashboard/marketplace/connect",
+    })
+  : null;
+
+/** In-memory Connect account mapping (M4; persisted to DB in production). */
+const connectAccounts = new Map<string, { stripeAccountId: string; status: string }>();
+
+/** Start Stripe Connect onboarding for the current user (skill author). */
+marketplaceRoutes.post("/v1/marketplace/connect/onboard", async (c) => {
+  if (!connectClient) return c.json({ error: "stripe_connect_not_configured" }, 503);
+  const p = c.get("principal")!;
+
+  // Check if user already has a Connect account
+  const existing = connectAccounts.get(p.user_id);
+  let accountId: string;
+  if (existing) {
+    accountId = existing.stripeAccountId;
+  } else {
+    // We need the user's email — in production, fetch from DB.
+    // For now, use a placeholder since we don't have DB access here.
+    const result = await connectClient.createExpressAccount(`user-${p.user_id}@cascade.dev`);
+    accountId = result.accountId;
+    connectAccounts.set(p.user_id, { stripeAccountId: accountId, status: "pending" });
+  }
+
+  const link = await connectClient.createAccountLink(accountId);
+  return c.json({ url: link.url, expires_at: link.expiresAt.toISOString() });
+});
+
+/** Check Connect account status. */
+marketplaceRoutes.get("/v1/marketplace/connect/status", async (c) => {
+  if (!connectClient) return c.json({ error: "stripe_connect_not_configured" }, 503);
+  const p = c.get("principal")!;
+  const account = connectAccounts.get(p.user_id);
+  if (!account) return c.json({ status: "not_onboarded" });
+  try {
+    const status = await connectClient.getAccountStatus(account.stripeAccountId);
+    account.status = status.status;
+    return c.json(status);
+  } catch (e) {
+    return c.json({ error: "status_check_failed", detail: String(e) }, 502);
+  }
+});
+
+/** Get the revenue split for a given amount (preview). */
+marketplaceRoutes.get("/v1/marketplace/revenue/split", (c) => {
+  const amount = parseFloat(c.req.query("amount") ?? "0");
+  const { authorShare, platformFee } = ConnectClient.splitRevenue(amount);
+  return c.json({
+    total: amount,
+    author_share: authorShare,
+    platform_fee: platformFee,
+    author_percentage: 0.7,
+    platform_percentage: 0.3,
   });
 });

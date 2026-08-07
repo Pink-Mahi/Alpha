@@ -18,6 +18,12 @@ export function rateLimit(opts: {
   max: number;
 }): MiddlewareHandler {
   return async (c, next) => {
+    // Skip rate limiting in test mode
+    if (process.env.RATE_LIMIT_DISABLED === "1") {
+      await next();
+      return;
+    }
+
     const ip = c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ?? c.req.header("x-real-ip") ?? "unknown";
     const key = `${ip}`;
     const now = Date.now();

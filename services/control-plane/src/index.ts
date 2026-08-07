@@ -17,18 +17,35 @@ import { marketplaceRoutes } from "./routes/marketplace.ts";
 import { taskRoutes } from "./routes/tasks.ts";
 import { usageRoutes } from "./routes/usage.ts";
 import { rateLimit } from "./middleware/rateLimit.ts";
+import { securityHeaders } from "./middleware/securityHeaders.ts";
 
 const app = new Hono();
 
 app.use("*", logger());
+app.use("*", securityHeaders());
+
+// CORS — tightened for production. Allowed origins from env var.
+const allowedOrigins = (process.env.CORS_ALLOWED_ORIGINS ?? "http://localhost:3000,http://localhost:5173,http://localhost:8080").split(",");
 app.use(
   "*",
   cors({
-    origin: (origin) => origin, // M0: permissive; tighten before launch.
+    origin: (origin) => {
+      if (!origin) return null;
+      return allowedOrigins.includes(origin) ? origin : null;
+    },
     allowHeaders: ["Authorization", "Content-Type"],
     allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    exposeHeaders: ["X-Request-Id"],
+    maxAge: 600,
   }),
 );
+
+// Request ID for tracing
+app.use("*", async (c, next) => {
+  const reqId = c.req.header("x-request-id") ?? crypto.randomUUID();
+  c.header("X-Request-Id", reqId);
+  await next();
+});
 
 // Rate limit auth endpoints more aggressively (prevent brute force)
 app.use("/v1/auth/*", rateLimit({ windowMs: 60_000, max: 10 }));
