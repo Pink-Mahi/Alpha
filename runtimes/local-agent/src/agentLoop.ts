@@ -103,18 +103,28 @@ export class AgentLoop {
         return { summary: "budget exceeded", costUsd: this.costUsd, iterations, success: false };
       }
 
-      const response = await this.router.complete({
-        model: config.model,
-        messages: this.messages,
-        system: SYSTEM_PROMPT,
-        tools: toolDescriptors.map((t) => ({
-          name: t.name,
-          description: t.description,
-          input_schema: t.input_schema,
-        })),
-        max_tokens: 4096,
-        api_key: config.apiKey,
-      });
+      let response;
+      try {
+        response = await this.router.complete({
+          model: config.model,
+          messages: this.messages,
+          system: SYSTEM_PROMPT,
+          tools: toolDescriptors.map((t) => ({
+            name: t.name,
+            description: t.description,
+            input_schema: t.input_schema,
+          })),
+          max_tokens: 4096,
+          api_key: config.apiKey,
+        });
+      } catch (e) {
+        const errorMsg = e instanceof Error ? e.message : String(e);
+        this.emit(config, "task.failed", {
+          reason: `model router error: ${errorMsg}`,
+          cost_usd: this.costUsd,
+        });
+        return { summary: `model error: ${errorMsg}`, costUsd: this.costUsd, iterations, success: false };
+      }
 
       this.costUsd += response.cost_usd;
       this.emit(config, "cost.tick", {
