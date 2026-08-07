@@ -13,6 +13,7 @@ import { authRoutes } from "./routes/auth.ts";
 import { byoKeyRoutes } from "./routes/byo-key.ts";
 import { billingRoutes } from "./routes/billing.ts";
 import { healthRoutes } from "./routes/health.ts";
+import { marketplaceRoutes } from "./routes/marketplace.ts";
 import { taskRoutes } from "./routes/tasks.ts";
 import { usageRoutes } from "./routes/usage.ts";
 
@@ -32,6 +33,7 @@ app.route("/", healthRoutes);
 app.route("/", authRoutes);
 app.route("/", byoKeyRoutes);
 app.route("/", billingRoutes);
+app.route("/", marketplaceRoutes);
 app.route("/", taskRoutes);
 app.route("/", usageRoutes);
 
