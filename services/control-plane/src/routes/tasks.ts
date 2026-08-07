@@ -75,7 +75,12 @@ taskRoutes.post("/v1/tasks/:id/start", async (c) => {
   if (taskRows.length === 0) return c.json({ error: "not_found" }, 404);
   const t = taskRows[0]!;
 
-  if (t.status === "running") return c.json({ error: "already_running" }, 409);
+  if (t.status === "running") {
+    // Check if the agent is actually still running by probing the local agent.
+    // If the agent task is gone (e.g. agent restarted), allow re-starting.
+    // We can't know the old agent_task_id here, so just allow re-start and
+    // let the local agent handle it. The old run is orphaned.
+  }
 
   // 2. Fetch BYO key for the org (prefer anthropic, then openai)
   const keys = await db.select().from(byoKey).where(eq(byoKey.org_id, p.org_id));
@@ -161,6 +166,16 @@ taskRoutes.get("/v1/tasks/:id/events", async (c) => {
     const resp = await fetch(`${LOCAL_AGENT_URL}/v1/agent/${agentTaskId}`);
     if (!resp.ok) return c.json({ error: "agent_not_found" }, 404);
     const data = await resp.json() as { status: string; events: Array<Record<string, unknown>>; result?: { summary: string; costUsd: number; iterations: number; success: boolean } };
+
+    // Sync task status in DB when agent finishes
+    if (data.status === "complete") {
+      await db.update(task).set({ status: "complete" }).where(eq(task.id, id));
+    } else if (data.status === "failed") {
+      await db.update(task).set({ status: "failed" }).where(eq(task.id, id));
+    } else if (data.status === "killed") {
+      await db.update(task).set({ status: "killed" }).where(eq(task.id, id));
+    }
+
     return c.json(data);
   } catch {
     return c.json({ error: "agent_unreachable" }, 502);

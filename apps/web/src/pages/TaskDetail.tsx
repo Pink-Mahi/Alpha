@@ -95,6 +95,7 @@ export function TaskDetail() {
   async function startAgent() {
     setError("");
     setStarting(true);
+    setAgentState(null); // clear old state from previous run
     const token = localStorage.getItem("alpha_token");
     try {
       const resp = await fetch(`/v1/tasks/${id}/start`, {
@@ -104,9 +105,11 @@ export function TaskDetail() {
       const data = await resp.json();
       if (!resp.ok) {
         setError(data.message ?? data.error ?? "Failed to start agent");
+        setStarting(false);
         return;
       }
       setAgentTaskId(data.agent_task_id);
+      setStarting(false);
     } catch {
       setError("Network error — is the backend running?");
     } finally {
@@ -178,10 +181,10 @@ export function TaskDetail() {
       )}
 
       {/* Agent controls */}
-      <div style={{ display: "flex", gap: "0.75rem", marginBottom: "1rem" }}>
-        {!agentTaskId && !isDone && (
+      <div style={{ display: "flex", gap: "0.75rem", marginBottom: "1rem", alignItems: "center" }}>
+        {!isRunning && (
           <button className="btn" onClick={startAgent} disabled={starting}>
-            {starting ? "Starting agent..." : "▶ Start Agent"}
+            {starting ? "Starting agent..." : (isDone ? "▶ Restart Agent" : "▶ Start Agent")}
           </button>
         )}
         {isRunning && (
@@ -189,12 +192,17 @@ export function TaskDetail() {
             {killing ? "Stopping..." : "■ Stop Agent"}
           </button>
         )}
-        {agentTaskId && (
-          <span className="muted" style={{ fontSize: "0.8125rem", alignSelf: "center" }}>
+        {agentTaskId && agentState && (
+          <span className="muted" style={{ fontSize: "0.8125rem" }}>
             {isRunning && <span style={{ color: "#1f6feb" }}>● Agent working...</span>}
             {agentStatus === "complete" && <span style={{ color: "#238636" }}>✓ Complete</span>}
             {agentStatus === "failed" && <span style={{ color: "#f85149" }}>✗ Failed</span>}
             {agentStatus === "killed" && <span style={{ color: "#f85149" }}>■ Stopped</span>}
+          </span>
+        )}
+        {task.status === "running" && !agentTaskId && (
+          <span className="muted" style={{ fontSize: "0.8125rem", color: "#d29922" }}>
+            ⚠ Task was previously started but no agent session is active. Click Start to re-run.
           </span>
         )}
       </div>
