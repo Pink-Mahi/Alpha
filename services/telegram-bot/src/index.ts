@@ -30,6 +30,10 @@ const TELEGRAM_API = `https://api.telegram.org/bot${BOT_TOKEN}`;
 
 // In-memory mapping: chatId → swarmId (could be persisted to DB later)
 const chatSwarms = new Map<number, string>();
+// Track last seen status for each swarm to detect changes
+const lastSwarmStatus = new Map<string, string>();
+// Track last event count for each swarm to detect new events
+const lastEventCount = new Map<string, number>();
 
 interface TelegramUpdate {
   update_id: number;
@@ -205,3 +209,78 @@ async function pollLoop() {
 }
 
 pollLoop();
+
+// Status monitoring loop — checks linked swarms for updates and notifies users
+async function statusLoop() {
+  while (true) {
+    await new Promise((r) => setTimeout(r, 10000)); // check every 10 seconds
+
+    for (const [chatId, swarmId] of chatSwarms) {
+      try {
+        const resp = await fetch(`${LOCAL_AGENT_URL}/v1/agent/swarm/${swarmId}`, {
+          signal: AbortSignal.timeout(5000),
+        });
+        if (!resp.ok) continue;
+        const data = await resp.json() as {
+          status: string;
+          agents: Array<{ id: string; status: string; model: string; events: Array<{ type: string; payload?: { summary?: string; reason?: string } }> }>;
+          supervisors: Array<{ id: string; status: string; model: string; events: Array<{ type: string; payload?: { summary?: string; reason?: string; kind?: string } }> }>;
+        };
+
+        const prevStatus = lastSwarmStatus.get(swarmId);
+        const prevEventCount = lastEventCount.get(swarmId) ?? 0;
+
+        // Count total events
+        const totalEvents = [...data.agents, ...data.supervisors].reduce((sum, a) => sum + a.events.length, 0);
+
+        // Check for status change
+        if (prevStatus && prevStatus !== data.status) {
+          if (data.status === "complete") {
+            // Find the supervisor's completion summary
+            let summary = "All agents have completed their work.";
+            for (const sup of data.supervisors) {
+              const completeEvent = sup.events.find((e) => e.type === "task.complete");
+              if (completeEvent?.payload?.summary) {
+                summary = completeEvent.payload.summary;
+                break;
+              }
+            }
+            await sendMessage(chatId, `✅ *Swarm Complete!*\n\n${summary.slice(0, 1000)}\n\nCheck the ALPHA web UI for full details and files.`);
+          } else if (data.status === "failed") {
+            await sendMessage(chatId, `❌ *Swarm Failed*\n\nThe swarm encountered an error. Check the ALPHA web UI for details.`);
+          }
+        }
+
+        // Check for new supervisor reflections or completions (new events)
+        if (totalEvents > prevEventCount) {
+          for (const sup of data.supervisors) {
+            for (const evt of sup.events.slice(-5)) {
+              // Speak new reflections via text (Telegram doesn't support TTS easily)
+              if (evt.type === "state.event" && evt.payload?.kind === "self_reflection" && evt.payload?.summary) {
+                // Only send if this is a new event
+                const eventIndex = sup.events.indexOf(evt);
+                if (eventIndex >= prevEventCount - sup.events.length + 5) {
+                  // It's recent enough — send it
+                  // Avoid spam: only send reflections every 30 seconds at most
+                  const lastNotified = lastReflectionNotified.get(chatId) ?? 0;
+                  if (Date.now() - lastNotified > 30000) {
+                    await sendMessage(chatId, `🔭 *Supervisor Update:*\n${evt.payload.summary.slice(0, 500)}`);
+                    lastReflectionNotified.set(chatId, Date.now());
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        lastSwarmStatus.set(swarmId, data.status);
+        lastEventCount.set(swarmId, totalEvents);
+      } catch {
+        // Network error — skip this cycle
+      }
+    }
+  }
+}
+
+const lastReflectionNotified = new Map<number, number>();
+statusLoop();

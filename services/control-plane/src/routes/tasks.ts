@@ -660,3 +660,62 @@ taskRoutes.post("/v1/tasks/:id/transcribe", async (c) => {
     return c.json({ error: "transcription_failed", detail: String(e) }, 500);
   }
 });
+
+/** POST /v1/tasks/:id/speak — text-to-speech via OpenAI TTS API. Returns audio buffer. */
+taskRoutes.post("/v1/tasks/:id/speak", async (c) => {
+  const p = c.get("principal")!;
+  const id = c.req.param("id");
+  const db = getDb();
+  const taskRows = await db.select().from(task).where(and(eq(task.id, id), eq(task.org_id, p.org_id))).limit(1);
+  if (taskRows.length === 0) return c.json({ error: "not_found" }, 404);
+
+  // Get the user's OpenAI API key
+  const keys = await db.select().from(byoKey).where(eq(byoKey.org_id, p.org_id));
+  const openaiKey = keys.find((k) => k.provider === "openai");
+  if (!openaiKey) return c.json({ error: "no_openai_key", message: "Add an OpenAI API key in Settings for text-to-speech." }, 400);
+  const decryptedKey = Buffer.from(openaiKey.encrypted_key, "base64").toString("utf8");
+
+  const body = await c.req.json().catch(() => ({}));
+  const text = body.text as string | undefined;
+  const voice = (body.voice as string) ?? "alloy"; // alloy, echo, fable, onyx, nova, shimmer
+  const model = (body.model as string) ?? "tts-1";
+
+  if (!text || text.trim().length === 0) return c.json({ error: "empty_text" }, 400);
+
+  // Truncate to 4096 chars (OpenAI TTS limit)
+  const truncatedText = text.slice(0, 4096);
+
+  try {
+    const resp = await fetch("https://api.openai.com/v1/audio/speech", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${decryptedKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        input: truncatedText,
+        voice,
+        response_format: "mp3",
+        speed: 1.0,
+      }),
+    });
+
+    if (!resp.ok) {
+      const errText = await resp.text();
+      return c.json({ error: "tts_error", detail: errText }, 502);
+    }
+
+    const audioBuffer = await resp.arrayBuffer();
+    // Return as audio/mpeg
+    return new Response(audioBuffer, {
+      headers: {
+        "Content-Type": "audio/mpeg",
+        "Content-Length": String(audioBuffer.byteLength),
+        "Cache-Control": "no-cache",
+      },
+    });
+  } catch (e) {
+    return c.json({ error: "tts_failed", detail: String(e) }, 500);
+  }
+});

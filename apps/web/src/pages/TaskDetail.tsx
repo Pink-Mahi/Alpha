@@ -87,6 +87,11 @@ export function TaskDetail() {
   const [swarmMessages, setSwarmMessages] = useState<Array<{ id: string; text: string; ts: string; source: string }>>([]);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
+  // TTS state — supervisor speaks responses aloud
+  const [voiceEnabled, setVoiceEnabled] = useState(() => localStorage.getItem("alpha_voice_enabled") === "true");
+  const [voiceType, setVoiceType] = useState(() => localStorage.getItem("alpha_voice_type") ?? "alloy");
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const lastSpokenEventRef = useRef<number>(0);
 
   const fetchTask = useCallback(async () => {
     const token = localStorage.getItem("alpha_token");
@@ -336,6 +341,78 @@ export function TaskDetail() {
       }
     } catch { /* ignore */ }
   }
+
+  // --- Text-to-Speech (supervisor speaks responses) ---
+  async function speakText(text: string) {
+    if (!voiceEnabled || !text.trim()) return;
+    const token = localStorage.getItem("alpha_token");
+    if (!token) return;
+    setIsSpeaking(true);
+    try {
+      const resp = await fetch(`/v1/tasks/${id}/speak`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ text: text.slice(0, 4096), voice: voiceType }),
+      });
+      if (!resp.ok) return;
+      const audioBlob = await resp.blob();
+      const audioUrl = URL.createObjectURL(audioBlob);
+      const audio = new Audio(audioUrl);
+      audio.onended = () => {
+        URL.revokeObjectURL(audioUrl);
+        setIsSpeaking(false);
+      };
+      audio.onerror = () => {
+        URL.revokeObjectURL(audioUrl);
+        setIsSpeaking(false);
+      };
+      await audio.play();
+    } catch {
+      setIsSpeaking(false);
+    }
+  }
+
+  // Auto-speak new supervisor events
+  useEffect(() => {
+    if (!voiceEnabled) return;
+    // Check supervisor events for new ones to speak
+    for (const sup of swarmSupervisors) {
+      const recentEvents = sup.events.slice(-5);
+      for (const evt of recentEvents) {
+        const eventSeq = evt.seq ?? 0;
+        if (eventSeq <= lastSpokenEventRef.current) continue;
+        let speakContent: string | null = null;
+        // Speak task completions with summary
+        if (evt.type === "task.complete" && evt.payload?.summary) {
+          speakContent = `Supervisor here. Task complete. ${evt.payload.summary}`;
+        } else if (evt.type === "task.failed" && evt.payload?.reason) {
+          speakContent = `Supervisor here. I've encountered an issue. ${evt.payload.reason}`;
+        } else if (evt.type === "state.event" && evt.payload?.kind === "self_reflection" && evt.payload?.summary) {
+          // Speak supervisor reflections (these contain the supervisor's assessment)
+          speakContent = `Supervisor update. ${evt.payload.summary}`;
+        }
+        if (speakContent) {
+          lastSpokenEventRef.current = Math.max(lastSpokenEventRef.current, eventSeq);
+          speakText(speakContent);
+        }
+      }
+    }
+  }, [swarmSupervisors, voiceEnabled]);
+
+  // Auto-speak swarm message acknowledgments (when a new user message gets a response)
+  useEffect(() => {
+    if (!voiceEnabled || swarmMessages.length === 0) return;
+    // When we send a message, we don't immediately get a voice response
+    // but the supervisor will process it and we'll see new events
+  }, [swarmMessages, voiceEnabled]);
+
+  // Persist voice settings
+  useEffect(() => {
+    localStorage.setItem("alpha_voice_enabled", String(voiceEnabled));
+  }, [voiceEnabled]);
+  useEffect(() => {
+    localStorage.setItem("alpha_voice_type", voiceType);
+  }, [voiceType]);
 
   async function saveTitle() {
     if (!titleDraft.trim() || !task) return;
@@ -623,6 +700,38 @@ export function TaskDetail() {
           </div>
         )}
         <div style={{ display: "flex", gap: "0.5rem", alignItems: "flex-end" }}>
+          {/* Voice controls: TTS toggle + voice selector */}
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem", height: "fit-content" }}>
+            <button
+              className="btn"
+              onClick={() => setVoiceEnabled(!voiceEnabled)}
+              style={{
+                height: "fit-content",
+                background: voiceEnabled ? "rgba(35, 134, 54, 0.15)" : "var(--card-bg)",
+                border: `1px solid ${voiceEnabled ? "#238636" : "var(--border)"}`,
+                color: voiceEnabled ? "#238636" : "var(--muted)",
+                minWidth: "40px",
+              }}
+              title={voiceEnabled ? "Voice responses ON — click to mute" : "Voice responses OFF — click to enable"}
+            >
+              {isSpeaking ? "🔊" : voiceEnabled ? "🔈" : "🔇"}
+            </button>
+            {voiceEnabled && (
+              <select
+                value={voiceType}
+                onChange={(e) => setVoiceType(e.target.value)}
+                style={{ fontSize: "0.65rem", padding: "0.1rem", border: "1px solid var(--border)", borderRadius: "var(--radius)", background: "var(--card-bg)", color: "var(--text)", cursor: "pointer" }}
+                title="Choose voice"
+              >
+                <option value="alloy">Alloy</option>
+                <option value="echo">Echo</option>
+                <option value="fable">Fable</option>
+                <option value="onyx">Onyx</option>
+                <option value="nova">Nova</option>
+                <option value="shimmer">Shimmer</option>
+              </select>
+            )}
+          </div>
           {/* Microphone button */}
           <button
             className="btn"
