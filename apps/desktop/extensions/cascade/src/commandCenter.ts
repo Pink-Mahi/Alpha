@@ -7,15 +7,19 @@
 import * as vscode from "vscode";
 
 import type { ControlPlaneClient } from "./controlPlaneClient";
+import type { LocalAgentClient, AgentEvent } from "./localAgentClient";
 import type { State } from "./state";
 
 export class CommandCenterProvider implements vscode.WebviewViewProvider {
   private view?: vscode.WebviewView;
+  private pollTimer?: ReturnType<typeof setInterval>;
+  private lastEventSeq = -1;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
     private readonly state: State,
     private readonly client: ControlPlaneClient,
+    private readonly agentClient: LocalAgentClient,
   ) {}
 
   resolveWebviewView(view: vscode.WebviewView): void {
@@ -67,6 +71,45 @@ export class CommandCenterProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  /** Start polling the local agent runtime for events. */
+  startPolling(taskId: string): void {
+    this.stopPolling();
+    this.lastEventSeq = -1;
+    this.pollTimer = setInterval(async () => {
+      const status = await this.agentClient.getStatus(taskId);
+      if (!status) return;
+
+      // Send new events to the webview.
+      const newEvents = status.events.filter((e) => e.seq > this.lastEventSeq);
+      if (newEvents.length > 0) {
+        this.lastEventSeq = newEvents[newEvents.length - 1]!.seq;
+        this.view?.webview.postMessage({
+          type: "events",
+          events: newEvents.map(formatEvent),
+        });
+      }
+
+      // Check if task is done.
+      if (status.status !== "running") {
+        this.stopPolling();
+        this.view?.webview.postMessage({
+          type: "taskDone",
+          status: status.status,
+          result: status.result,
+        });
+        await this.state.setCurrentTaskId(undefined);
+        this.refresh();
+      }
+    }, 2000);
+  }
+
+  stopPolling(): void {
+    if (this.pollTimer) {
+      clearInterval(this.pollTimer);
+      this.pollTimer = undefined;
+    }
+  }
+
   private getHtml(webview: vscode.Webview): string {
     const nonce = getNonce();
     const csp = [
@@ -98,6 +141,13 @@ export class CommandCenterProvider implements vscode.WebviewViewProvider {
     .status.running { background: var(--vscode-inputValidation-infoBackground); }
     .hidden { display: none; }
     .muted { opacity: 0.6; font-size: 11px; }
+    .eventLog { margin-top: 12px; max-height: 400px; overflow-y: auto; font-size: 12px; font-family: var(--vscode-editor-font-family); }
+    .eventLog .event { padding: 4px 0; border-bottom: 1px solid var(--vscode-editorGroup-border); }
+    .eventLog .event .seq { opacity: 0.4; margin-right: 6px; }
+    .eventLog .event.tool { color: var(--vscode-textLink-foreground); }
+    .eventLog .event.cost { color: var(--vscode-charts-yellow); }
+    .eventLog .event.complete { color: var(--vscode-testing-iconPassed); }
+    .eventLog .event.failed { color: var(--vscode-testing-iconFailed); }
   </style>
 </head>
 <body>
@@ -120,6 +170,8 @@ export class CommandCenterProvider implements vscode.WebviewViewProvider {
       <button class="btn secondary" id="pauseBtn">Pause</button>
       <button class="btn secondary" id="killBtn">Kill</button>
     </div>
+
+    <div id="eventLog" class="eventLog"></div>
   </div>
 
   <script nonce="${nonce}">
@@ -137,6 +189,7 @@ export class CommandCenterProvider implements vscode.WebviewViewProvider {
     document.getElementById('pauseBtn').addEventListener('click', () => vscode.postMessage({ type: 'pause' }));
     document.getElementById('killBtn').addEventListener('click', () => vscode.postMessage({ type: 'kill' }));
 
+    const eventLog = document.getElementById('eventLog');
     window.addEventListener('message', (e) => {
       const msg = e.data;
       if (msg.type === 'state') {
@@ -156,6 +209,23 @@ export class CommandCenterProvider implements vscode.WebviewViewProvider {
           taskStatus.className = 'status idle';
           agentControls.classList.add('hidden');
         }
+      } else if (msg.type === 'events') {
+        for (const ev of msg.events) {
+          const div = document.createElement('div');
+          div.className = 'event ' + ev.type.split('.')[0];
+          div.innerHTML = '<span class="seq">#' + ev.seq + '</span>' + ev.text;
+          eventLog.appendChild(div);
+        }
+        eventLog.scrollTop = eventLog.scrollHeight;
+      } else if (msg.type === 'taskDone') {
+        if (msg.status === 'complete') {
+          taskStatus.textContent = 'Task complete: ' + (msg.result?.summary?.slice(0, 60) ?? '');
+          taskStatus.className = 'status running';
+        } else {
+          taskStatus.textContent = 'Task ' + msg.status;
+          taskStatus.className = 'status idle';
+        }
+        agentControls.classList.add('hidden');
       }
     });
   </script>
@@ -171,4 +241,45 @@ function getNonce(): string {
     result += chars[Math.floor(Math.random() * chars.length)];
   }
   return result;
+}
+
+/** Format an agent event for display in the webview. */
+function formatEvent(e: AgentEvent): { seq: number; type: string; text: string } {
+  let text = "";
+  switch (e.type) {
+    case "task.start":
+      text = `Task started: ${(e.payload as { spec?: string }).spec?.slice(0, 60) ?? ""}`;
+      break;
+    case "task.plan":
+      text = `Plan: ${(e.payload as { steps?: Array<{ summary?: string }> }).steps?.length ?? 0} steps`;
+      break;
+    case "tool.call":
+      text = `Calling: ${(e.payload as { tool?: string }).tool ?? ""}`;
+      break;
+    case "tool.result": {
+      const err = (e.payload as { error?: string | null }).error;
+      text = err ? `Tool error: ${err.slice(0, 80)}` : "Tool completed";
+      break;
+    }
+    case "state.event":
+      text = (e.payload as { summary?: string }).summary ?? e.type;
+      break;
+    case "cost.tick": {
+      const cost = (e.payload as { cost_usd?: number }).cost_usd ?? 0;
+      text = `Cost: $${cost.toFixed(4)}`;
+      break;
+    }
+    case "human.checkpoint":
+      text = `Approval needed: ${(e.payload as { reason?: string }).reason ?? ""}`;
+      break;
+    case "task.complete":
+      text = `Done: ${(e.payload as { summary?: string }).summary?.slice(0, 80) ?? ""}`;
+      break;
+    case "task.failed":
+      text = `Failed: ${(e.payload as { reason?: string }).reason ?? ""}`;
+      break;
+    default:
+      text = e.type;
+  }
+  return { seq: e.seq, type: e.type, text };
 }

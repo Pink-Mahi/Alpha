@@ -11,15 +11,17 @@ import * as vscode from "vscode";
 
 import { CommandCenterProvider } from "./commandCenter";
 import { ControlPlaneClient } from "./controlPlaneClient";
+import { LocalAgentClient } from "./localAgentClient";
 import { State } from "./state";
 
 export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
   const state = new State(ctx);
   await state.loadToken();
   const client = new ControlPlaneClient(state);
+  const agentClient = new LocalAgentClient();
 
   // Register the webview provider for the Command Center panel.
-  const provider = new CommandCenterProvider(ctx.extensionUri, state, client);
+  const provider = new CommandCenterProvider(ctx.extensionUri, state, client, agentClient);
   ctx.subscriptions.push(
     vscode.window.registerWebviewViewProvider("cascade.commandCenter", provider, {
       webviewOptions: { retainContextWhenHidden: true },
@@ -47,10 +49,30 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
         placeHolder: "e.g. Refactor auth.ts to use passkeys",
       });
       if (!spec) return;
-      await client.createTask(spec);
+      // Start the task on the local agent runtime.
+      const workspaceFolders = vscode.workspace.workspaceFolders;
+      const cwd = workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
+      const model = vscode.workspace.getConfiguration("cascade").get<string>("defaultModel") ?? "anthropic:claude-3-5-sonnet-latest";
+      const budget = vscode.workspace.getConfiguration("cascade").get<number>("budgetUSD") ?? 2.0;
+      const result = await agentClient.startTask({ spec, cwd, model, budget_usd: budget });
+      if (result) {
+        await state.setCurrentTaskId(result.task_id);
+        provider.refresh();
+        // Start polling for events.
+        provider.startPolling(result.task_id);
+      }
     }),
-    vscode.commands.registerCommand("cascade.pauseAgent", () => client.pauseCurrentTask()),
-    vscode.commands.registerCommand("cascade.killAgent", () => client.killCurrentTask()),
+    vscode.commands.registerCommand("cascade.pauseAgent", () => {
+      provider.stopPolling();
+      return client.pauseCurrentTask();
+    }),
+    vscode.commands.registerCommand("cascade.killAgent", async () => {
+      const id = state.currentTaskId;
+      if (id) await agentClient.killTask(id);
+      provider.stopPolling();
+      await state.setCurrentTaskId(undefined);
+      provider.refresh();
+    }),
     vscode.commands.registerCommand("cascade.signIn", async () => {
       const token = await vscode.window.showInputBox({
         prompt: "Paste your Cascade API token",
