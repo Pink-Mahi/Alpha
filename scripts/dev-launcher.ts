@@ -50,8 +50,7 @@ const procs: Array<{ name: string; proc: ReturnType<typeof spawn> }> = [];
 
 console.log("=== ALPHA Dev Launcher ===\n");
 
-for (const svc of services) {
-  console.log(`Starting ${svc.name} on port ${svc.port}...`);
+function startService(svc: typeof services[0]): ReturnType<typeof spawn> {
   const proc = spawn({
     cmd: svc.cmd,
     cwd: svc.cwd ?? ".",
@@ -59,7 +58,6 @@ for (const svc of services) {
     stdout: "pipe",
     stderr: "pipe",
   });
-  procs.push({ name: svc.name, proc });
 
   // Stream output with prefix.
   (async () => {
@@ -87,6 +85,23 @@ for (const svc of services) {
     }
   })();
 
+  // Auto-restart on exit
+  (async () => {
+    const exitCode = await proc.exited;
+    console.error(`[${svc.name}] exited with code ${exitCode}, restarting in 2s...`);
+    await Bun.sleep(2000);
+    const newProc = startService(svc);
+    const idx = procs.findIndex((p) => p.name === svc.name);
+    if (idx >= 0) procs[idx]!.proc = newProc;
+  })();
+
+  return proc;
+}
+
+for (const svc of services) {
+  console.log(`Starting ${svc.name} on port ${svc.port}...`);
+  const proc = startService(svc);
+  procs.push({ name: svc.name, proc });
   await Bun.sleep(1000); // Stagger starts slightly.
 }
 
