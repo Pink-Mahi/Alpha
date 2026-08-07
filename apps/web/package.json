@@ -1,0 +1,13 @@
+{
+  "name": "@cascade/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "echo 'web app TODO (M5)' && exit 0",
+    "build": "echo 'web app TODO (M5)' && exit 0",
+    "typecheck": "echo 'web app TODO (M5)' && exit 0",
+    "test": "echo 'web app TODO (M5)' && exit 0",
+    "lint": "echo 'web app TODO (M5)' && exit 0"
+  }
+}

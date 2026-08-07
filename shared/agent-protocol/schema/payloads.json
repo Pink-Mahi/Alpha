@@ -1,0 +1,150 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cascade.dev/schemas/agent-protocol/payloads.json",
+  "title": "AgentMessagePayloads",
+  "description": "Discriminated union of payloads for each agent message type. The `type` field on the envelope selects the payload.",
+  "type": "object",
+  "oneOf": [
+    { "$ref": "#/$defs/task.start" },
+    { "$ref": "#/$defs/task.plan" },
+    { "$ref": "#/$defs/tool.call" },
+    { "$ref": "#/$defs/tool.result" },
+    { "$ref": "#/$defs/state.event" },
+    { "$ref": "#/$defs/checkpoint" },
+    { "$ref": "#/$defs/cost.tick" },
+    { "$ref": "#/$defs/human.checkpoint" },
+    { "$ref": "#/$defs/task.complete" },
+    { "$ref": "#/$defs/task.failed" }
+  ],
+  "$defs": {
+    "task.start": {
+      "type": "object",
+      "required": ["spec", "budget_usd", "deadline", "runtime", "tool_allowlist", "model_policy", "memory_scope"],
+      "additionalProperties": false,
+      "properties": {
+        "spec": { "type": "string" },
+        "repo_ref": { "type": ["string", "null"] },
+        "budget_usd": { "type": "number", "minimum": 0 },
+        "deadline": { "type": "string", "format": "date-time" },
+        "runtime": { "type": "string", "enum": ["local", "cloud"] },
+        "tool_allowlist": { "type": "array", "items": { "type": "string" } },
+        "model_policy": { "$ref": "#/$defs/model_policy" },
+        "memory_scope": { "type": "array", "items": { "type": "string", "enum": ["session", "project", "user", "org"] } }
+      }
+    },
+    "task.plan": {
+      "type": "object",
+      "required": ["steps"],
+      "additionalProperties": false,
+      "properties": {
+        "steps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["summary", "risk"],
+            "additionalProperties": false,
+            "properties": {
+              "summary": { "type": "string" },
+              "risk": { "type": "string", "enum": ["none", "low", "medium", "high", "destructive"] },
+              "requires_approval": { "type": "boolean" }
+            }
+          }
+        }
+      }
+    },
+    "tool.call": {
+      "type": "object",
+      "required": ["request_id", "tool", "args"],
+      "additionalProperties": false,
+      "properties": {
+        "request_id": { "type": "string" },
+        "tool": { "type": "string" },
+        "args": { "type": "object" }
+      }
+    },
+    "tool.result": {
+      "type": "object",
+      "required": ["request_id"],
+      "additionalProperties": false,
+      "properties": {
+        "request_id": { "type": "string" },
+        "output": {},
+        "error": { "type": ["string", "null"] }
+      }
+    },
+    "state.event": {
+      "type": "object",
+      "required": ["kind", "summary"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "type": "string", "enum": ["file_edit", "shell", "browser", "git", "message", "call"] },
+        "summary": { "type": "string" },
+        "diff_ref": { "type": ["string", "null"] }
+      }
+    },
+    "checkpoint": {
+      "type": "object",
+      "required": ["seq", "state_ref"],
+      "additionalProperties": false,
+      "properties": {
+        "seq": { "type": "integer", "minimum": 0 },
+        "state_ref": { "type": "string" },
+        "fs_ref": { "type": ["string", "null"] }
+      }
+    },
+    "cost.tick": {
+      "type": "object",
+      "required": ["model", "cost_usd"],
+      "additionalProperties": false,
+      "properties": {
+        "model": { "type": "string" },
+        "tokens_in": { "type": "integer", "minimum": 0 },
+        "tokens_out": { "type": "integer", "minimum": 0 },
+        "cost_usd": { "type": "number", "minimum": 0 }
+      }
+    },
+    "human.checkpoint": {
+      "type": "object",
+      "required": ["reason", "proposed_action"],
+      "additionalProperties": false,
+      "properties": {
+        "reason": { "type": "string" },
+        "proposed_action": { "type": "string" },
+        "diff_preview": { "type": ["string", "null"] },
+        "voice_prompt": { "type": ["string", "null"], "description": "Rendered as spoken yes/no when origin is a voice agent." }
+      }
+    },
+    "task.complete": {
+      "type": "object",
+      "required": ["summary", "cost_usd", "duration_ms"],
+      "additionalProperties": false,
+      "properties": {
+        "summary": { "type": "string" },
+        "artifacts": { "type": "array", "items": { "type": "string" } },
+        "pr_url": { "type": ["string", "null"] },
+        "cost_usd": { "type": "number", "minimum": 0 },
+        "duration_ms": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "task.failed": {
+      "type": "object",
+      "required": ["reason", "cost_usd"],
+      "additionalProperties": false,
+      "properties": {
+        "reason": { "type": "string" },
+        "partial_state_ref": { "type": ["string", "null"] },
+        "cost_usd": { "type": "number", "minimum": 0 }
+      }
+    },
+    "model_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "preferred": { "type": "array", "items": { "type": "string" }, "description": "Provider/model ids in preference order." },
+        "max_cost_per_1k_usd": { "type": ["number", "null"] },
+        "max_latency_ms": { "type": ["integer", "null"] },
+        "require_json": { "type": "boolean" }
+      }
+    }
+  }
+}

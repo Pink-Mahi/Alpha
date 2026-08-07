@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cascade.dev/schemas/agent-protocol/tool-descriptor.json",
+  "title": "ToolDescriptor",
+  "description": "Describes a tool capability exposed to agents. The orchestrator enforces allow-lists per agent role + skill using this metadata.",
+  "type": "object",
+  "required": ["name", "input_schema", "output_schema", "permissions_required", "side_effect", "runtime"],
+  "additionalProperties": false,
+  "properties": {
+    "name": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$", "description": "Stable tool identifier, snake_case." },
+    "description": { "type": "string" },
+    "input_schema": { "type": "object", "description": "JSON Schema for the tool args object." },
+    "output_schema": { "type": "object", "description": "JSON Schema for the tool result object." },
+    "permissions_required": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Capability tokens the calling agent/skill must hold, e.g. fs.read:/repo, shell.exec:git, phone.call.outbound."
+    },
+    "side_effect": { "type": "string", "enum": ["none", "read", "write", "destructive"] },
+    "cost_estimate_usd": { "type": ["number", "null"], "minimum": 0 },
+    "runtime": { "type": "string", "enum": ["local", "cloud", "either"] },
+    "voice_safe": { "type": "boolean", "description": "If true, may be invoked inline during a voice call without spoken consent. Only side_effect none|read may be voice_safe." }
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "name": "@cascade/skills-sdk",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "build": "echo 'skills-sdk TODO (M2)' && exit 0",
+    "typecheck": "echo 'skills-sdk TODO (M2)' && exit 0",
+    "test": "echo 'skills-sdk TODO (M2)' && exit 0",
+    "lint": "echo 'skills-sdk TODO (M2)' && exit 0"
+  }
+}

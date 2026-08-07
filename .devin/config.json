@@ -1,0 +1,6 @@
+{
+  "project_name": "Cascade Platform",
+  "description": "Commercial agentic dev platform + personal agent + phone AI.",
+  "default_mode": "normal",
+  "rules_files": ["AGENTS.md"]
+}

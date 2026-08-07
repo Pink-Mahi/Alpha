@@ -1,0 +1,14 @@
+{
+  "name": "@cascade/ui-kit",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "build": "echo 'ui-kit TODO (M5)' && exit 0",
+    "typecheck": "echo 'ui-kit TODO (M5)' && exit 0",
+    "test": "echo 'ui-kit TODO (M5)' && exit 0",
+    "lint": "echo 'ui-kit TODO (M5)' && exit 0"
+  }
+}

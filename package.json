@@ -1,0 +1,34 @@
+{
+  "name": "cascade-platform",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Commercial agentic dev platform + personal agent + phone AI (working name: Cascade, TBD).",
+  "packageManager": "bun@1.3.14",
+  "workspaces": [
+    "apps/web",
+    "apps/tray-agent",
+    "services/control-plane",
+    "shared/agent-protocol/ts",
+    "shared/skills-sdk",
+    "shared/ui-kit",
+    "packages/billing-client",
+    "packages/usage-meter",
+    "packages/observability"
+  ],
+  "scripts": {
+    "build": "bun run --filter '*' build",
+    "typecheck": "bun run --filter '*' typecheck",
+    "test": "bun run --filter '*' test",
+    "lint": "bun run --filter '*' lint",
+    "dev:control-plane": "bun --filter ./services/control-plane dev",
+    "dev:web": "bun --filter ./apps/web dev"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "@types/node": "^22.9.0",
+    "vitest": "^2.1.5"
+  },
+  "engines": {
+    "bun": ">=1.3.0"
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cascade.dev/schemas/agent-protocol/envelope.json",
+  "title": "AgentMessageEnvelope",
+  "description": "Canonical envelope wrapping every agent protocol message. Uniform across local, cloud, and voice runtimes.",
+  "type": "object",
+  "required": ["version", "org_id", "run_id", "task_id", "seq", "ts", "type", "payload"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "type": "string", "const": "1.0" },
+    "org_id": { "type": "string", "format": "uuid" },
+    "run_id": { "type": "string", "format": "uuid" },
+    "task_id": { "type": "string", "format": "uuid" },
+    "parent_run_id": { "type": ["string", "null"], "format": "uuid" },
+    "seq": { "type": "integer", "minimum": 0, "description": "Monotonic per-run sequence number for ordering/replay." },
+    "ts": { "type": "string", "format": "date-time" },
+    "type": {
+      "type": "string",
+      "enum": [
+        "task.start",
+        "task.plan",
+        "tool.call",
+        "tool.result",
+        "state.event",
+        "checkpoint",
+        "cost.tick",
+        "human.checkpoint",
+        "task.complete",
+        "task.failed"
+      ]
+    },
+    "payload": { "$ref": "payloads.json" }
+  }
+}

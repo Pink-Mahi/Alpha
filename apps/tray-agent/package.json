@@ -1,0 +1,13 @@
+{
+  "name": "@cascade/tray-agent",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "echo 'tray agent TODO (M2)' && exit 0",
+    "build": "echo 'tray agent TODO (M2)' && exit 0",
+    "typecheck": "echo 'tray agent TODO (M2)' && exit 0",
+    "test": "echo 'tray agent TODO (M2)' && exit 0",
+    "lint": "echo 'tray agent TODO (M2)' && exit 0"
+  }
+}

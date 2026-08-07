@@ -1,0 +1,14 @@
+{
+  "name": "@cascade/usage-meter",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "build": "echo 'usage-meter TODO (M1)' && exit 0",
+    "typecheck": "echo 'usage-meter TODO (M1)' && exit 0",
+    "test": "echo 'usage-meter TODO (M1)' && exit 0",
+    "lint": "echo 'usage-meter TODO (M1)' && exit 0"
+  }
+}

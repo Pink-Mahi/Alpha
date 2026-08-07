@@ -1,0 +1,6 @@
+# Cascade infra variables example. Copy to terraform.tfvars and fill in.
+# DO NOT commit real values.
+
+env         = "dev"
+aws_region  = "us-east-1"
+db_password = "replace-me-with-a-real-secret"
