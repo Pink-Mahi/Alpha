@@ -11,6 +11,7 @@ import { z } from "zod";
 import { $, Glob } from "bun";
 import { readFile, writeFile, readdir, stat, mkdir } from "node:fs/promises";
 import { join, relative, isAbsolute } from "node:path";
+import { browserNavigate, browserScreenshot, browserClick, browserFill, browserExtract, browserGetHtml, browserAnalyzeSeo, browserScroll, browserListElements, browserWait } from "./browserTools.js";
 
 import type { ToolDef, ToolContext } from "./toolBus.js";
 
@@ -380,4 +381,15 @@ export function registerBuiltinTools(bus: import("./toolBus.js").ToolBus): void 
   bus.register(searchFiles);
   bus.register(webSearch);
   bus.register(webFetch);
+  // Browser automation tools
+  bus.register(browserNavigate);
+  bus.register(browserScreenshot);
+  bus.register(browserClick);
+  bus.register(browserFill);
+  bus.register(browserExtract);
+  bus.register(browserGetHtml);
+  bus.register(browserAnalyzeSeo);
+  bus.register(browserScroll);
+  bus.register(browserListElements);
+  bus.register(browserWait);
 }
