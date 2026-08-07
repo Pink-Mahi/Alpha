@@ -1,0 +1,8 @@
+# Ignore the upstream VS Code source — it's a fork tracked as a separate git
+# repo inside apps/desktop/vscode/. We don't commit it into our monorepo.
+# Our changes live in:
+#   apps/desktop/product.json     (branding overlay)
+#   apps/desktop/build/patches/   (source patches)
+#   apps/desktop/extensions/cascade/  (our built-in extension)
+#   apps/desktop/scripts/         (setup/build/run)
+vscode/

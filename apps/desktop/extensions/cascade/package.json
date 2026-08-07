@@ -1,0 +1,113 @@
+{
+  "name": "cascade-agent",
+  "displayName": "Cascade Agent",
+  "description": "Agentic coding command center — plan, execute, review multi-file tasks with autonomous agents.",
+  "version": "0.0.0",
+  "publisher": "dev.cascade",
+  "engines": {
+    "vscode": "^1.99.0"
+  },
+  "categories": ["Other", "Machine Learning", "Chat"],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "cascade",
+          "title": "Cascade",
+          "icon": "media/cascade-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "cascade": [
+        {
+          "id": "cascade.commandCenter",
+          "name": "Command Center",
+          "type": "webview"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "cascade.newTask",
+        "title": "Cascade: New Task",
+        "category": "Cascade"
+      },
+      {
+        "command": "cascade.openCommandCenter",
+        "title": "Cascade: Open Command Center",
+        "category": "Cascade"
+      },
+      {
+        "command": "cascade.pauseAgent",
+        "title": "Cascade: Pause Agent",
+        "category": "Cascade"
+      },
+      {
+        "command": "cascade.killAgent",
+        "title": "Cascade: Kill Agent",
+        "category": "Cascade"
+      },
+      {
+        "command": "cascade.signIn",
+        "title": "Cascade: Sign In",
+        "category": "Cascade"
+      }
+    ],
+    "configuration": {
+      "title": "Cascade",
+      "properties": {
+        "cascade.serverUrl": {
+          "type": "string",
+          "default": "http://localhost:8080",
+          "description": "Cascade control plane URL."
+        },
+        "cascade.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "Cascade API key (or use the Sign In command)."
+        },
+        "cascade.defaultRuntime": {
+          "type": "string",
+          "enum": ["local", "cloud"],
+          "default": "local",
+          "description": "Default agent runtime for new tasks."
+        },
+        "cascade.budgetUSD": {
+          "type": "number",
+          "default": 2.0,
+          "description": "Default per-task budget cap in USD."
+        }
+      }
+    },
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "cascade.newTask",
+          "when": "cascade.signedIn"
+        },
+        {
+          "command": "cascade.pauseAgent",
+          "when": "cascade.agentRunning"
+        },
+        {
+          "command": "cascade.killAgent",
+          "when": "cascade.agentRunning"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "bun run compile",
+    "compile": "tsc -p ./tsconfig.json",
+    "watch": "tsc -p ./tsconfig.json --watch",
+    "typecheck": "tsc -p ./tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.99.0",
+    "@types/node": "^22.9.0",
+    "typescript": "^5.6.3"
+  }
+}

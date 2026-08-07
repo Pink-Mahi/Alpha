@@ -5,6 +5,7 @@
   "description": "Commercial agentic dev platform + personal agent + phone AI (working name: Cascade, TBD).",
   "packageManager": "bun@1.3.14",
   "workspaces": [
+    "apps/desktop",
     "apps/web",
     "apps/tray-agent",
     "services/control-plane",

@@ -1,0 +1,15 @@
+{
+  "name": "@cascade/desktop",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "setup": "bun scripts/setup.ts",
+    "build": "bun scripts/build.ts",
+    "run": "bun scripts/run.ts",
+    "dev": "bun scripts/run.ts",
+    "typecheck": "echo 'desktop fork typecheck TODO' && exit 0",
+    "test": "echo 'desktop fork tests TODO' && exit 0",
+    "lint": "echo 'desktop fork lint TODO' && exit 0"
+  }
+}
