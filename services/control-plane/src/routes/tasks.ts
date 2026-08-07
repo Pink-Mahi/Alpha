@@ -200,3 +200,124 @@ taskRoutes.post("/v1/tasks/:id/:action", async (c) => {
 
   return c.json({ ok: true, id, action });
 });
+
+/** GET /v1/tasks/:id/files — list files created by the agent (in the task's cwd). */
+taskRoutes.get("/v1/tasks/:id/files", async (c) => {
+  const p = c.get("principal")!;
+  const id = c.req.param("id");
+  const db = getDb();
+  const taskRows = await db.select().from(task).where(and(eq(task.id, id), eq(task.org_id, p.org_id))).limit(1);
+  if (taskRows.length === 0) return c.json({ error: "not_found" }, 404);
+  const t = taskRows[0]!;
+  const cwd = t.repo_ref ?? process.cwd();
+
+  try {
+    const files = await listFiles(cwd);
+    return c.json({ files, cwd });
+  } catch (e) {
+    return c.json({ error: "failed_to_list", detail: String(e) }, 500);
+  }
+});
+
+/** GET /v1/tasks/:id/file?path=<path> — read a file's contents. */
+taskRoutes.get("/v1/tasks/:id/file", async (c) => {
+  const p = c.get("principal")!;
+  const id = c.req.param("id");
+  const filePath = c.req.query("path");
+  if (!filePath) return c.json({ error: "path required" }, 400);
+
+  const db = getDb();
+  const taskRows = await db.select().from(task).where(and(eq(task.id, id), eq(task.org_id, p.org_id))).limit(1);
+  if (taskRows.length === 0) return c.json({ error: "not_found" }, 404);
+  const t = taskRows[0]!;
+  const cwd = t.repo_ref ?? process.cwd();
+
+  // Resolve path relative to cwd, prevent path traversal
+  const resolved = resolve(cwd, filePath);
+  if (!resolved.startsWith(resolve(cwd))) return c.json({ error: "path_outside_cwd" }, 400);
+
+  try {
+    const content = await Bun.file(resolved).text();
+    const ext = resolved.split(".").pop()?.toLowerCase() ?? "";
+    return c.json({ path: filePath, content, ext, absolute: resolved });
+  } catch {
+    return c.json({ error: "file_not_found" }, 404);
+  }
+});
+
+/** POST /v1/tasks/:id/run — run a file (Python) and return stdout/stderr. */
+taskRoutes.post("/v1/tasks/:id/run", async (c) => {
+  const p = c.get("principal")!;
+  const id = c.req.param("id");
+  const body = await c.req.json().catch(() => ({})) as { path?: string };
+  if (!body.path) return c.json({ error: "path required" }, 400);
+
+  const db = getDb();
+  const taskRows = await db.select().from(task).where(and(eq(task.id, id), eq(task.org_id, p.org_id))).limit(1);
+  if (taskRows.length === 0) return c.json({ error: "not_found" }, 404);
+  const t = taskRows[0]!;
+  const cwd = t.repo_ref ?? process.cwd();
+
+  const resolved = resolve(cwd, body.path);
+  if (!resolved.startsWith(resolve(cwd))) return c.json({ error: "path_outside_cwd" }, 400);
+
+  const ext = resolved.split(".").pop()?.toLowerCase() ?? "";
+  let cmd: string[];
+  if (ext === "py") {
+    cmd = ["python", resolved];
+  } else if (ext === "js") {
+    cmd = ["node", resolved];
+  } else if (ext === "ts") {
+    cmd = ["bun", resolved];
+  } else {
+    return c.json({ error: "unsupported_file_type", ext }, 400);
+  }
+
+  try {
+    const proc = Bun.spawn({
+      cmd,
+      cwd: resolve(cwd),
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const stdout = await new Response(proc.stdout).text();
+    const stderr = await new Response(proc.stderr).text();
+    const exitCode = await proc.exited;
+    return c.json({ stdout, stderr, exitCode, path: body.path });
+  } catch (e) {
+    return c.json({ error: "run_failed", detail: String(e) }, 500);
+  }
+});
+
+/** List files in a directory (non-recursive, top-level only). */
+async function listFiles(dir: string): Promise<Array<{ name: string; size: number; ext: string }>> {
+  const { readdirSync, statSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const entries: Array<{ name: string; size: number; ext: string }> = [];
+  try {
+    const names = readdirSync(dir);
+    for (const name of names) {
+      if (name.startsWith(".") || name === "node_modules") continue;
+      const fullPath = join(dir, name);
+      try {
+        const stat = statSync(fullPath);
+        if (!stat.isFile()) continue;
+      } catch { continue; }
+      const ext = name.split(".").pop()?.toLowerCase() ?? "";
+      if (["py", "js", "ts", "html", "css", "json", "md", "txt"].includes(ext) ||
+          name === "package.json" || name === "tsconfig.json") {
+        const file = Bun.file(fullPath);
+        entries.push({ name, size: file.size, ext });
+      }
+    }
+  } catch (e) {
+    throw new Error(`Cannot read directory: ${String(e)}`);
+  }
+  return entries.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** Resolve a path relative to a base directory. */
+function resolve(...paths: string[]): string {
+  const { resolve: pathResolve } = require("node:path");
+  return pathResolve(...paths);
+}

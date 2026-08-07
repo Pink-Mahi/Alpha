@@ -250,6 +250,174 @@ export function TaskDetail() {
           </div>
         </div>
       )}
+
+      {/* File browser + preview pane */}
+      {isDone && <FileBrowser taskId={id!} />}
+    </div>
+  );
+}
+
+/** File browser with code view, run button, and live HTML preview. */
+function FileBrowser({ taskId }: { taskId: string }) {
+  const [files, setFiles] = useState<Array<{ name: string; size: number; ext: string }>>([]);
+  const [selectedFile, setSelectedFile] = useState<string | null>(null);
+  const [fileContent, setFileContent] = useState<string>("");
+  const [fileExt, setFileExt] = useState<string>("");
+  const [running, setRunning] = useState(false);
+  const [runOutput, setRunOutput] = useState<{ stdout: string; stderr: string; exitCode: number } | null>(null);
+  const [showPreview, setShowPreview] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchFiles();
+  }, []);
+
+  async function fetchFiles() {
+    const token = localStorage.getItem("alpha_token");
+    try {
+      const resp = await fetch(`/v1/tasks/${taskId}/files`, { headers: { Authorization: `Bearer ${token}` } });
+      if (resp.ok) {
+        const data = await resp.json();
+        setFiles(data.files ?? []);
+        // Auto-select the first interesting file
+        const first = (data.files ?? []).find((f: { ext: string }) => ["html", "py", "js"].includes(f.ext));
+        if (first) {
+          loadFile(first.name);
+        }
+      }
+    } catch { /* ignore */ }
+    finally { setLoading(false); }
+  }
+
+  async function loadFile(path: string) {
+    setSelectedFile(path);
+    setRunOutput(null);
+    setShowPreview(false);
+    const token = localStorage.getItem("alpha_token");
+    try {
+      const resp = await fetch(`/v1/tasks/${taskId}/file?path=${encodeURIComponent(path)}`, { headers: { Authorization: `Bearer ${token}` } });
+      if (resp.ok) {
+        const data = await resp.json();
+        setFileContent(data.content ?? "");
+        setFileExt(data.ext ?? "");
+        // Auto-show preview for HTML files
+        if (data.ext === "html") setShowPreview(true);
+      }
+    } catch { /* ignore */ }
+  }
+
+  async function runFile() {
+    if (!selectedFile) return;
+    setRunning(true);
+    setRunOutput(null);
+    setShowPreview(false);
+    const token = localStorage.getItem("alpha_token");
+    try {
+      const resp = await fetch(`/v1/tasks/${taskId}/run`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ path: selectedFile }),
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        setRunOutput({ stdout: data.stdout ?? "", stderr: data.stderr ?? "", exitCode: data.exitCode ?? 0 });
+      } else {
+        const data = await resp.json().catch(() => ({}));
+        setRunOutput({ stdout: "", stderr: data.error ?? "Failed to run", exitCode: -1 });
+      }
+    } catch (e) {
+      setRunOutput({ stdout: "", stderr: `Network error: ${e}`, exitCode: -1 });
+    }
+    finally { setRunning(false); }
+  }
+
+  if (loading) return null;
+  if (files.length === 0) return null;
+
+  const canRun = ["py", "js", "ts"].includes(fileExt);
+  const canPreview = fileExt === "html";
+
+  return (
+    <div className="card" style={{ marginTop: "1rem", padding: 0, overflow: "hidden" }}>
+      <div style={{ padding: "0.75rem 1rem", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <span style={{ fontWeight: 600, fontSize: "0.875rem" }}>Files Created by Agent</span>
+        <div style={{ display: "flex", gap: "0.5rem" }}>
+          {canRun && (
+            <button className="btn" style={{ fontSize: "0.75rem", padding: "0.25rem 0.6rem" }} onClick={runFile} disabled={running}>
+              {running ? "Running..." : "▶ Run"}
+            </button>
+          )}
+          {canPreview && (
+            <button className="btn" style={{ fontSize: "0.75rem", padding: "0.25rem 0.6rem" }} onClick={() => setShowPreview(!showPreview)}>
+              {showPreview ? "📄 Code" : "👁 Preview"}
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div style={{ display: "flex", minHeight: "300px" }}>
+        {/* File list sidebar */}
+        <div style={{ width: "200px", borderRight: "1px solid var(--border)", padding: "0.5rem", overflowY: "auto" }}>
+          {files.map((f) => (
+            <div
+              key={f.name}
+              onClick={() => loadFile(f.name)}
+              style={{
+                padding: "0.4rem 0.6rem",
+                cursor: "pointer",
+                borderRadius: "var(--radius)",
+                fontSize: "0.8125rem",
+                background: selectedFile === f.name ? "var(--border)" : "transparent",
+                fontFamily: "monospace",
+                display: "flex",
+                alignItems: "center",
+                gap: "0.4rem",
+              }}
+              onMouseEnter={(e) => { if (selectedFile !== f.name) e.currentTarget.style.background = "var(--bg)"; }}
+              onMouseLeave={(e) => { if (selectedFile !== f.name) e.currentTarget.style.background = "transparent"; }}
+            >
+              <span style={{ fontSize: "0.7rem", opacity: 0.6 }}>{f.ext}</span>
+              {f.name}
+            </div>
+          ))}
+        </div>
+
+        {/* Content area */}
+        <div style={{ flex: 1, overflow: "auto" }}>
+          {showPreview && canPreview ? (
+            <iframe
+              srcDoc={fileContent}
+              title="Preview"
+              style={{ width: "100%", height: "400px", border: "none", background: "white" }}
+              sandbox="allow-scripts allow-same-origin"
+            />
+          ) : runOutput ? (
+            <div style={{ padding: "0.75rem", fontFamily: "monospace", fontSize: "0.8125rem" }}>
+              {runOutput.stdout && (
+                <div>
+                  <div className="muted" style={{ fontSize: "0.7rem", marginBottom: "0.25rem" }}>stdout:</div>
+                  <pre style={{ whiteSpace: "pre-wrap", margin: 0, marginBottom: "0.75rem" }}>{runOutput.stdout}</pre>
+                </div>
+              )}
+              {runOutput.stderr && (
+                <div>
+                  <div style={{ fontSize: "0.7rem", marginBottom: "0.25rem", color: "#f85149" }}>stderr:</div>
+                  <pre style={{ whiteSpace: "pre-wrap", margin: 0, color: "#f85149" }}>{runOutput.stderr}</pre>
+                </div>
+              )}
+              <div className="muted" style={{ fontSize: "0.7rem", marginTop: "0.5rem" }}>Exit code: {runOutput.exitCode}</div>
+            </div>
+          ) : selectedFile ? (
+            <pre style={{ padding: "0.75rem", margin: 0, fontSize: "0.8125rem", whiteSpace: "pre-wrap", fontFamily: "monospace", overflowX: "auto" }}>
+              {fileContent || "(empty file)"}
+            </pre>
+          ) : (
+            <div className="muted" style={{ padding: "2rem", textAlign: "center", fontSize: "0.875rem" }}>
+              Select a file to view its contents
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

@@ -1,7 +1,8 @@
 import random
 import os
 import sys
-import time
+import tty
+import termios
 
 # Constants for the game
 GRID_SIZE = 5
@@ -15,74 +16,88 @@ DOWN = (1, 0)
 LEFT = (0, -1)
 RIGHT = (0, 1)
 
-# Initialize the game state
-grid = [[EMPTY_CHAR for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)]
-snake = [(2, 2)]  # Start with the snake in the middle of the grid
-direction = RIGHT
-food = None
+class SnakeGame:
+    def __init__(self):
+        self.grid = [[EMPTY_CHAR for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)]
+        self.snake = [(2, 2)]  # Start in the middle of the grid
+        self.direction = RIGHT
+        self.place_food()
+        self.update_grid()
 
+    def place_food(self):
+        while True:
+            x, y = random.randint(0, GRID_SIZE - 1), random.randint(0, GRID_SIZE - 1)
+            if (x, y) not in self.snake:
+                self.grid[x][y] = FOOD_CHAR
+                break
 
-def place_food():
-    """Place food on the grid at a random empty location."""
-    global food
-    empty_cells = [(r, c) for r in range(GRID_SIZE) for c in range(GRID_SIZE) if grid[r][c] == EMPTY_CHAR]
-    food = random.choice(empty_cells)
-    grid[food[0]][food[1]] = FOOD_CHAR
+    def update_grid(self):
+        for x in range(GRID_SIZE):
+            for y in range(GRID_SIZE):
+                if (x, y) in self.snake:
+                    self.grid[x][y] = SNAKE_CHAR
+                elif self.grid[x][y] != FOOD_CHAR:
+                    self.grid[x][y] = EMPTY_CHAR
 
+    def print_grid(self):
+        os.system('clear')  # Clear the console
+        for row in self.grid:
+            print(' '.join(row))
+        print("Use WASD keys to move the snake. Press 'q' to quit.")
 
-def print_grid():
-    """Print the current state of the grid."""
-    os.system('cls' if os.name == 'nt' else 'clear')
-    for row in grid:
-        print(' '.join(row))
-    print(f"Score: {len(snake) - 1}")
+    def move_snake(self):
+        head_x, head_y = self.snake[0]
+        delta_x, delta_y = self.direction
+        new_head = (head_x + delta_x, head_y + delta_y)
 
+        # Check for collisions
+        if (new_head in self.snake) or not (0 <= new_head[0] < GRID_SIZE and 0 <= new_head[1] < GRID_SIZE):
+            print("Game Over!")
+            sys.exit(0)
 
-def move_snake():
-    """Move the snake in the current direction."""
-    global snake, food
-    head = snake[0]
-    new_head = (head[0] + direction[0], head[1] + direction[1])
+        # Check for food
+        if self.grid[new_head[0]][new_head[1]] == FOOD_CHAR:
+            self.snake.insert(0, new_head)  # Grow the snake
+            self.place_food()
+        else:
+            self.snake.insert(0, new_head)
+            self.snake.pop()  # Move the snake
 
-    # Check for collisions with walls
-    if not (0 <= new_head[0] < GRID_SIZE and 0 <= new_head[1] < GRID_SIZE):
-        print("Game Over! You hit the wall.")
-        sys.exit()
+        self.update_grid()
 
-    # Check for collisions with itself
-    if new_head in snake:
-        print("Game Over! You ran into yourself.")
-        sys.exit()
+    def change_direction(self, new_direction):
+        # Prevent the snake from reversing
+        opposite_directions = {UP: DOWN, DOWN: UP, LEFT: RIGHT, RIGHT: LEFT}
+        if opposite_directions.get(self.direction) != new_direction:
+            self.direction = new_direction
 
-    # Move the snake
-    snake.insert(0, new_head)
+    def get_input(self):
+        fd = sys.stdin.fileno()
+        old_settings = termios.tcgetattr(fd)
+        try:
+            tty.setraw(sys.stdin.fileno())
+            ch = sys.stdin.read(1)
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+        return ch
 
-    # Check if food is eaten
-    if new_head == food:
-        place_food()
-    else:
-        tail = snake.pop()
-        grid[tail[0]][tail[1]] = EMPTY_CHAR
-
-    # Update the grid
-    grid[new_head[0]][new_head[1]] = SNAKE_CHAR
-
-
-def change_direction(new_direction):
-    """Change the direction of the snake if it's not directly opposite."""
-    global direction
-    if (direction[0] + new_direction[0], direction[1] + new_direction[1]) != (0, 0):
-        direction = new_direction
-
-
-def main():
-    """Main game loop."""
-    place_food()
-    while True:
-        print_grid()
-        move_snake()
-        time.sleep(0.5)  # Control the speed of the game
-
+    def run(self):
+        while True:
+            self.print_grid()
+            key = self.get_input()
+            if key == 'w':
+                self.change_direction(UP)
+            elif key == 's':
+                self.change_direction(DOWN)
+            elif key == 'a':
+                self.change_direction(LEFT)
+            elif key == 'd':
+                self.change_direction(RIGHT)
+            elif key == 'q':
+                print("Quitting game.")
+                break
+            self.move_snake()
 
 if __name__ == "__main__":
-    main()
+    game = SnakeGame()
+    game.run()
