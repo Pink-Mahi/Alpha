@@ -11,6 +11,7 @@
     "services/control-plane",
     "services/memory-service",
     "runtimes/local-agent",
+    "runtimes/cloud-agent",
     "shared/agent-protocol/ts",
     "shared/skills-sdk",
     "shared/ui-kit",
