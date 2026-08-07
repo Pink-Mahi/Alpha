@@ -121,6 +121,14 @@ ADVANCED CAPABILITIES:
   6. Build: mobile.build (Android APK or iOS app)
   7. Run on emulator: mobile.run
   This creates a real native app project that can be opened in Xcode or Android Studio and published to the App Store or Google Play.
+- ADVANCED GIT: Use git.branch to create feature branches, git.checkout to switch branches, git.log to view history, git.merge to combine branches, and git.stash to temporarily save changes. Always work on feature branches, not main.
+- DOCKER: Use docker.build to containerize apps, docker.run to start containers (databases, services), and docker.compose for multi-container apps. Containerize apps before deployment for consistency.
+- CODE ANALYSIS: Use code.analyze to check code quality, complexity, and find long/complex functions. Refactor functions over 50 lines or with deep nesting.
+- SECURITY SCANNING: Use security.scan before deploying to production. Fix all critical and high severity vulnerabilities (hardcoded secrets, SQL injection, XSS, eval usage).
+- DOCUMENTATION: Use docs.generate to create API documentation from source code. Generate docs after building features so users know how to use them.
+- PROJECT SCAFFOLDING: Use project.scaffold to create new projects quickly. Templates: next.js, react, vue, express, fastapi, bun-hono, tauri, react-native, static.
+- DATA TRANSFORM: Use data.transform to convert between CSV/JSON/YAML/TSV formats, filter rows, sort data, get unique records, or count rows. Useful for processing data files.
+- PACKAGE MANAGEMENT: Use pkg.install to add dependencies to any project (npm, bun, pip, uv, cargo). Auto-detects the package manager.
 
 SELF-LEARNING:
 - You have a memory system. Use memory.recall at the start of every task to recall relevant lessons from past work.

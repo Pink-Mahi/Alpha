@@ -17,6 +17,7 @@
     "hono": "^4.6.10",
     "playwright": "^1.62.1",
     "postgres": "^3.4.9",
+    "yaml": "^2.9.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {

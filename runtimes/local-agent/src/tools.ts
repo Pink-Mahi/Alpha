@@ -16,6 +16,11 @@ import { memoryRecall, memoryLearn, memoryGuideline, memoryList } from "./memory
 import { codeRun, httpRequest, fsEdit, deployStatic, createVisionTool, createImageGenTool } from "./advancedTools.js";
 import { dbQuery, dbExecute, browserAnalyzeAccessibility, browserLighthouse, notifyWebhook, testGenerate, browserSetViewport } from "./tier2Tools.js";
 import { mobileConvert, mobileConfig, mobileIcon, mobileBuild, mobileRun } from "./mobileTools.js";
+import {
+  gitBranch, gitCheckout, gitLog, gitMerge, gitStash,
+  dockerBuild, dockerRun, dockerCompose,
+  codeAnalyze, securityScan, docsGenerate, projectScaffold, dataTransform, pkgInstall,
+} from "./tier3Tools.js";
 import type { ModelRouterClient } from "./modelRouterClient.js";
 
 import type { ToolDef, ToolContext } from "./toolBus.js";
@@ -425,4 +430,19 @@ export function registerBuiltinTools(bus: import("./toolBus.js").ToolBus, router
   bus.register(mobileIcon);
   bus.register(mobileBuild);
   bus.register(mobileRun);
+  // Tier 3 tools — advanced git, Docker, code analysis, security, docs, scaffold, data
+  bus.register(gitBranch);
+  bus.register(gitCheckout);
+  bus.register(gitLog);
+  bus.register(gitMerge);
+  bus.register(gitStash);
+  bus.register(dockerBuild);
+  bus.register(dockerRun);
+  bus.register(dockerCompose);
+  bus.register(codeAnalyze);
+  bus.register(securityScan);
+  bus.register(docsGenerate);
+  bus.register(projectScaffold);
+  bus.register(dataTransform);
+  bus.register(pkgInstall);
 }
