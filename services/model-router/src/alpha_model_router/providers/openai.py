@@ -29,18 +29,25 @@ class OpenAIAdapter:
 
         Agent loop sends: { name, description, input_schema: {...} }
         OpenAI expects:   { type: "function", function: { name, description, parameters: {...} } }
+
+        Also sanitizes tool names: OpenAI requires ^[a-zA-Z0-9_-]+$ (no dots),
+        so "fs.read" becomes "fs_read".
         """
         converted = []
         for t in tools:
             # Already in OpenAI format?
             if t.get("type") == "function" and "function" in t:
-                converted.append(t)
+                # Still sanitize the name
+                fn = dict(t["function"])
+                fn["name"] = fn.get("name", "").replace(".", "_")
+                converted.append({**t, "function": fn})
                 continue
             # Anthropic format — convert
+            name = t.get("name", "").replace(".", "_")
             converted.append({
                 "type": "function",
                 "function": {
-                    "name": t.get("name", ""),
+                    "name": name,
                     "description": t.get("description", ""),
                     "parameters": t.get("input_schema") or t.get("parameters") or {"type": "object", "properties": {}},
                 },
@@ -69,10 +76,18 @@ class OpenAIAdapter:
             import json
 
             for tc in choice.message.tool_calls:
+                # Convert tool name back: fs_read -> fs.read
+                # (OpenAI requires [a-zA-Z0-9_-] but our tools use dots)
+                original_name = tc.function.name
+                # Try to restore dots for known tool prefixes
+                for prefix in ["fs_", "git_", "shell_", "search_"]:
+                    if original_name.startswith(prefix):
+                        original_name = prefix[:-1] + "." + original_name[len(prefix):]
+                        break
                 tool_calls.append(
                     {
                         "id": tc.id,
-                        "name": tc.function.name,
+                        "name": original_name,
                         "args": json.loads(tc.function.arguments or "{}"),
                     }
                 )
