@@ -84,6 +84,7 @@ export const task = pgTable("task", {
   deadline: timestamp("deadline", { withTimezone: true }),
   runtime_pref: runtimeEnum("runtime_pref").default("local"),
   repo_ref: text("repo_ref"),
+  model: text("model"), // e.g. "anthropic:claude-3-5-sonnet-latest" — null = auto-pick
   created_at: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

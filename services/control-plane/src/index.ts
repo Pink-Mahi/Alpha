@@ -14,6 +14,7 @@ import { byoKeyRoutes } from "./routes/byo-key.ts";
 import { billingRoutes } from "./routes/billing.ts";
 import { healthRoutes } from "./routes/health.ts";
 import { marketplaceRoutes } from "./routes/marketplace.ts";
+import { modelRoutes } from "./routes/models.ts";
 import { taskRoutes } from "./routes/tasks.ts";
 import { usageRoutes } from "./routes/usage.ts";
 import { rateLimit } from "./middleware/rateLimit.ts";
@@ -57,6 +58,7 @@ app.route("/", authRoutes);
 app.route("/", byoKeyRoutes);
 app.route("/", billingRoutes);
 app.route("/", marketplaceRoutes);
+app.route("/", modelRoutes);
 app.route("/", taskRoutes);
 app.route("/", usageRoutes);
 

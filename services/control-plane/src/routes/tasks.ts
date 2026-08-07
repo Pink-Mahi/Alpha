@@ -19,6 +19,7 @@ const createSchema = z.object({
   deadline: z.string().datetime().optional(),
   runtime_pref: z.enum(["local", "cloud"]).default("local"),
   repo_ref: z.string().optional(),
+  model: z.string().optional(), // e.g. "anthropic:claude-3-5-sonnet-latest"
 });
 
 taskRoutes.use("*", authMiddleware());
@@ -40,6 +41,7 @@ taskRoutes.post("/v1/tasks", async (c) => {
       deadline: body.deadline ? new Date(body.deadline) : null,
       runtime_pref: body.runtime_pref,
       repo_ref: body.repo_ref,
+      model: body.model,
     })
     .returning();
   return c.json({ task: t[0] }, 201);
@@ -85,12 +87,19 @@ taskRoutes.post("/v1/tasks/:id/start", async (c) => {
   const preferredKey = keys.find((k) => k.provider === "anthropic") ?? keys[0]!;
   const decryptedKey = Buffer.from(preferredKey.encrypted_key, "base64").toString("utf8");
 
-  // Determine model based on provider
-  const model = preferredKey.provider === "anthropic"
-    ? "anthropic:claude-3-5-sonnet-latest"
-    : preferredKey.provider === "openai"
-      ? "openai:gpt-4o"
-      : "anthropic:claude-3-5-sonnet-latest";
+  // Use the model selected at task creation, or fall back to a default
+  // based on the available provider key
+  const model = t.model ??
+    (preferredKey.provider === "anthropic"
+      ? "anthropic:claude-3-5-sonnet-latest"
+      : preferredKey.provider === "openai"
+        ? "openai:gpt-4o"
+        : "anthropic:claude-3-5-sonnet-latest");
+
+  // Verify the selected model's provider has a BYO key
+  const modelProvider = model.split(":")[0];
+  const keyForProvider = keys.find((k) => k.provider === modelProvider) ?? preferredKey;
+  const apiKey = Buffer.from(keyForProvider.encrypted_key, "base64").toString("utf8");
 
   // 3. Dispatch to local agent
   const startBody = {
@@ -100,7 +109,7 @@ taskRoutes.post("/v1/tasks/:id/start", async (c) => {
     model,
     budget_usd: parseFloat(t.budget_usd),
     max_iterations: 20,
-    api_key: decryptedKey,
+    api_key: apiKey,
   };
 
   let agentResp: Response;

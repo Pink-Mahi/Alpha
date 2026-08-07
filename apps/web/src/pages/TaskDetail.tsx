@@ -19,6 +19,7 @@ interface TaskData {
   status: string;
   budget_usd: string;
   runtime_pref: string;
+  model: string | null;
   created_at: string;
 }
 
@@ -166,6 +167,7 @@ export function TaskDetail() {
         <div style={{ display: "flex", gap: "1rem", marginTop: "0.75rem" }}>
           <span className="muted" style={{ fontSize: "0.75rem" }}>Budget: ${task.budget_usd}</span>
           <span className="muted" style={{ fontSize: "0.75rem" }}>Runtime: {task.runtime_pref}</span>
+          <span className="muted" style={{ fontSize: "0.75rem" }}>Model: {task.model ? (task.model.split(":")[1] ?? task.model) : "auto"}</span>
         </div>
       </div>
 
