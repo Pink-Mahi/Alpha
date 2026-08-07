@@ -19,7 +19,7 @@ export function Tasks() {
   }, []);
 
   async function fetchTasks() {
-    const token = localStorage.getItem("ALPHA_token");
+    const token = localStorage.getItem("alpha_token");
     if (!token) { window.location.href = "/login"; return; }
     try {
       const resp = await fetch("/v1/tasks", { headers: { Authorization: `Bearer ${token}` } });
@@ -34,7 +34,7 @@ export function Tasks() {
 
   async function createTask(e: React.FormEvent) {
     e.preventDefault();
-    const token = localStorage.getItem("ALPHA_token");
+    const token = localStorage.getItem("alpha_token");
     const resp = await fetch("/v1/tasks", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },

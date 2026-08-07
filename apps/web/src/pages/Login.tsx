@@ -27,7 +27,7 @@ export function Login() {
         setError(data.error ?? "Authentication failed");
         return;
       }
-      localStorage.setItem("ALPHA_token", data.token);
+      localStorage.setItem("alpha_token", data.token);
       window.location.href = "/";
     } catch {
       setError("Network error");
