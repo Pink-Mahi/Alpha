@@ -19,6 +19,9 @@ export function App() {
         <NavLink to="/marketplace" className={({ isActive }) => (isActive ? "active" : "")}>
           Marketplace
         </NavLink>
+        <NavLink to="/settings" className={({ isActive }) => (isActive ? "active" : "")}>
+          Settings
+        </NavLink>
       </nav>
       <main className="main">
         <Outlet />
