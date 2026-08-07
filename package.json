@@ -10,6 +10,7 @@
     "apps/tray-agent",
     "services/control-plane",
     "services/memory-service",
+    "services/voice-service",
     "runtimes/local-agent",
     "runtimes/cloud-agent",
     "shared/agent-protocol/ts",
