@@ -1,0 +1,555 @@
+openapi: 3.1.0
+info:
+  title: Cascade Control Plane API
+  version: 0.1.0
+  description: |
+    The Cascade control plane handles authentication, organization management,
+    BYO-key storage, task tracking, usage metering, Stripe billing, and the
+    skills marketplace.
+
+    All endpoints (except /healthz and /v1/auth/*) require a Bearer JWT token
+    in the Authorization header.
+
+    Rate limits: 10 req/min for auth endpoints, 100 req/min for all others.
+servers:
+  - url: http://localhost:8080
+    description: Local development
+  - url: https://api.cascade.dev
+    description: Production
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+        detail:
+          type: string
+        issues:
+          type: array
+          items:
+            type: object
+
+    HealthStatus:
+      type: object
+      properties:
+        ok:
+          type: boolean
+
+    SignUpRequest:
+      type: object
+      required: [email, password, org_name]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 8
+        org_name:
+          type: string
+        name:
+          type: string
+
+    AuthToken:
+      type: object
+      properties:
+        token:
+          type: string
+        org_id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+
+    ByoKey:
+      type: object
+      properties:
+        id:
+          type: string
+        provider:
+          type: string
+          enum: [anthropic, openai, xai, google]
+        label:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    Task:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        spec:
+          type: string
+        status:
+          type: string
+          enum: [pending, running, paused, complete, failed, killed]
+        budget_usd:
+          type: number
+        runtime_pref:
+          type: string
+          enum: [local, cloud]
+
+    Plan:
+      type: object
+      properties:
+        id:
+          type: string
+          enum: [free, pro, team]
+        name:
+          type: string
+        price:
+          type: number
+        features:
+          type: array
+          items:
+            type: string
+        limits:
+          type: object
+
+    MarketplaceListing:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        version:
+          type: string
+        description:
+          type: string
+        author:
+          type: string
+        review:
+          type: string
+          enum: [verified, reviewed, experimental]
+        category:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        install_count:
+          type: integer
+        rating:
+          type: number
+        permissions:
+          type: array
+          items:
+            type: string
+
+security:
+  - BearerAuth: []
+
+paths:
+  /healthz:
+    get:
+      summary: Health check
+      security: []
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+
+  # --- Auth ---
+  /v1/auth/signup:
+    post:
+      summary: Sign up a new user and create an org
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SignUpRequest"
+      responses:
+        "201":
+          description: Account created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthToken"
+        "400":
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Email already registered
+
+  /v1/auth/login:
+    post:
+      summary: Log in and get a JWT token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+      responses:
+        "200":
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthToken"
+        "401":
+          description: Invalid credentials
+
+  /v1/me:
+    get:
+      summary: Get the current user's principal
+      responses:
+        "200":
+          description: Current user info
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  principal:
+                    type: object
+                    properties:
+                      kind:
+                        type: string
+                      user_id:
+                        type: string
+                      org_id:
+                        type: string
+                      role:
+                        type: string
+
+  # --- BYO Keys ---
+  /v1/byo-keys:
+    get:
+      summary: List BYO API keys
+      responses:
+        "200":
+          description: List of keys (masked)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  keys:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ByoKey"
+    post:
+      summary: Add a BYO API key
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [provider, key]
+              properties:
+                provider:
+                  type: string
+                  enum: [anthropic, openai, xai, google]
+                key:
+                  type: string
+                label:
+                  type: string
+      responses:
+        "201":
+          description: Key stored
+        "400":
+          description: Invalid input
+
+  /v1/byo-keys/{id}:
+    delete:
+      summary: Delete a BYO API key
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Key deleted
+        "404":
+          description: Key not found
+
+  # --- Tasks ---
+  /v1/tasks:
+    get:
+      summary: List tasks
+      responses:
+        "200":
+          description: List of tasks
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tasks:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Task"
+    post:
+      summary: Create a new task
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, spec]
+              properties:
+                title:
+                  type: string
+                spec:
+                  type: string
+                budget_usd:
+                  type: number
+                  default: 2.0
+                runtime_pref:
+                  type: string
+                  enum: [local, cloud]
+                  default: local
+      responses:
+        "201":
+          description: Task created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  task:
+                    $ref: "#/components/schemas/Task"
+
+  /v1/tasks/{id}:
+    get:
+      summary: Get task details
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Task details
+        "404":
+          description: Task not found
+
+  /v1/tasks/{id}/pause:
+    post:
+      summary: Pause a running task
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Task paused
+
+  /v1/tasks/{id}/kill:
+    post:
+      summary: Kill a running task
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Task killed
+
+  # --- Billing ---
+  /v1/billing/plans:
+    get:
+      summary: List available billing plans
+      responses:
+        "200":
+          description: Available plans
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  plans:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Plan"
+                  stripe_configured:
+                    type: boolean
+
+  /v1/billing/status:
+    get:
+      summary: Get the current org's billing status
+      responses:
+        "200":
+          description: Billing status
+
+  /v1/billing/checkout:
+    post:
+      summary: Create a Stripe Checkout session for upgrading
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [plan]
+              properties:
+                plan:
+                  type: string
+                  enum: [pro, team]
+      responses:
+        "200":
+          description: Checkout URL
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  url:
+                    type: string
+                  session_id:
+                    type: string
+        "503":
+          description: Stripe not configured
+
+  /v1/billing/webhook:
+    post:
+      summary: Stripe webhook handler
+      security: []
+      parameters:
+        - name: stripe-signature
+          in: header
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Webhook received
+        "400":
+          description: Invalid signature
+
+  # --- Marketplace ---
+  /v1/marketplace:
+    get:
+      summary: Browse the curated marketplace
+      parameters:
+        - name: category
+          in: query
+          schema:
+            type: string
+        - name: review
+          in: query
+          schema:
+            type: string
+            enum: [verified, reviewed, experimental]
+        - name: q
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Marketplace listings
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  listings:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/MarketplaceListing"
+                  total:
+                    type: integer
+
+  /v1/marketplace/{id}:
+    get:
+      summary: Get full listing details
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Listing details
+        "404":
+          description: Not found
+
+  /v1/marketplace/submit:
+    post:
+      summary: Submit a skill to the marketplace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [manifest, category, tags, readme]
+              properties:
+                manifest:
+                  type: object
+                category:
+                  type: string
+                tags:
+                  type: array
+                  items:
+                    type: string
+                readme:
+                  type: string
+                price_monthly:
+                  type: number
+                  default: 0
+      responses:
+        "201":
+          description: Submission created
+
+  /v1/marketplace/community:
+    get:
+      summary: List published community skills
+      responses:
+        "200":
+          description: Community listings
+
+  /v1/marketplace/revenue:
+    get:
+      summary: Get author revenue stats
+      responses:
+        "200":
+          description: Revenue stats
+
+  # --- Usage ---
+  /v1/usage:
+    get:
+      summary: Get usage metrics for the current org
+      responses:
+        "200":
+          description: Usage data
