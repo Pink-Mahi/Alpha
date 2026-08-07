@@ -18,12 +18,14 @@ import { randomUUID } from "node:crypto";
 import { HeartbeatScheduler } from "./heartbeat.js";
 import { SkillRegistry, type SkillManifest } from "./skills.js";
 import { BUILTIN_SKILLS } from "./builtinSkills.js";
+import { MessagingService } from "./messaging.js";
 
 const app = new Hono();
 app.use("*", logger());
 
 const scheduler = new HeartbeatScheduler();
 const skills = new SkillRegistry();
+const messaging = MessagingService.fromEnv();
 
 // Register built-in skills as available + auto-install them.
 for (const manifest of BUILTIN_SKILLS) {
@@ -56,6 +58,7 @@ app.get("/healthz", (c) =>
     ok: true,
     skills: skills.listInstalled().map((s) => s.id),
     heartbeats: scheduler.list().map((h) => ({ id: h.id, name: h.name, enabled: h.enabled, runCount: h.runCount })),
+    messaging: messaging.list().map((ch) => ch.name),
   }),
 );
 
@@ -149,6 +152,31 @@ app.post("/v1/heartbeats/:id/:action", (c) => {
   return c.json({ ok: true, id, action });
 });
 
+// --- Messaging routes -------------------------------------------------------
+
+app.get("/v1/messaging/channels", (c) => {
+  return c.json({ channels: messaging.list() });
+});
+
+const sendSchema = z.object({
+  channel: z.string(),
+  to: z.string(),
+  subject: z.string().optional(),
+  body: z.string().min(1),
+});
+
+app.post("/v1/messaging/send", async (c) => {
+  const parsed = sendSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) return c.json({ error: "invalid_body", issues: parsed.error.issues }, 400);
+  const result = await messaging.send(parsed.data.channel, {
+    to: parsed.data.to,
+    subject: parsed.data.subject,
+    body: parsed.data.body,
+  });
+  if (!result.ok) return c.json({ error: "send_failed", detail: result.error }, 502);
+  return c.json({ ok: true, id: result.id });
+});
+
 const port = Number(process.env.PORT ?? 8085);
 
 if (import.meta.main) {
@@ -156,6 +184,7 @@ if (import.meta.main) {
   console.log(`[tray-agent] listening on http://localhost:${server.port}`);
   console.log(`[tray-agent] skills: ${skills.listInstalled().map((s) => s.id).join(", ")}`);
   console.log(`[tray-agent] heartbeats: ${scheduler.list().filter((h) => h.enabled).length} active`);
+  console.log(`[tray-agent] messaging: ${messaging.list().map((c) => c.name).join(", ")}`);
 }
 
 // Clean shutdown.
