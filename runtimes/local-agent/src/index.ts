@@ -91,6 +91,7 @@ app.post("/v1/agent/start", async (c) => {
       "browser.navigate", "browser.screenshot", "browser.click", "browser.fill",
       "browser.extract", "browser.get_html", "browser.analyze_seo",
       "browser.scroll", "browser.list_elements", "browser.wait",
+      "memory.recall", "memory.learn", "memory.guideline", "memory.list",
     ]),
     onEvent: (env) => events.push(env),
     requestApproval: async (tool, args, reason) => {
@@ -269,6 +270,7 @@ Original task: ${body.spec}`;
         "browser.navigate", "browser.screenshot", "browser.click", "browser.fill",
         "browser.extract", "browser.get_html", "browser.analyze_seo",
         "browser.scroll", "browser.list_elements", "browser.wait",
+      "memory.recall", "memory.learn", "memory.guideline", "memory.list",
       ]),
       reflectionInterval: 5,
       externalContext: [],
@@ -362,6 +364,7 @@ You are the last line of defense for quality. Be demanding. Be thorough. Be proa
           "browser.navigate", "browser.screenshot", "browser.click", "browser.fill",
           "browser.extract", "browser.get_html", "browser.analyze_seo",
           "browser.scroll", "browser.list_elements", "browser.wait",
+      "memory.recall", "memory.learn", "memory.guideline", "memory.list",
         ]),
         reflectionInterval: 3,
         onEvent: (env) => supEvents.push(env),

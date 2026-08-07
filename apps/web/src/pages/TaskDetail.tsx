@@ -606,8 +606,9 @@ function EventRow({ event }: { event: AgentEvent }) {
       // Special icons for browser tools
       const isBrowser = tool.startsWith("browser.");
       const isWeb = tool.startsWith("web.");
-      const icon = isBrowser ? "🌐" : isWeb ? "🔍" : "🔧";
-      const color = isBrowser ? "#1f6feb" : isWeb ? "#a371f7" : "#d29922";
+      const isMemory = tool.startsWith("memory.");
+      const icon = isBrowser ? "🌐" : isWeb ? "🔍" : isMemory ? "🧠" : "🔧";
+      const color = isBrowser ? "#1f6feb" : isWeb ? "#a371f7" : isMemory ? "#238636" : "#d29922";
       return (
         <div style={{ fontSize: "0.8125rem", color, marginBottom: "0.25rem", paddingLeft: "0.5rem" }}>
           {icon} {tool}({argPreview}{Object.keys(args).length > 2 ? "..." : ""})

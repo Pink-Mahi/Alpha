@@ -15,6 +15,7 @@ import type { AgentMessageEnvelope, Payload } from "@alpha/agent-protocol";
 
 import type { ToolBus, ToolContext } from "./toolBus.js";
 import type { ModelRouterClient } from "./modelRouterClient.js";
+import { getRelevantMemoriesForTask, saveTaskLearning } from "./memoryTools.js";
 
 export interface AgentLoopConfig {
   orgId: string;
@@ -96,7 +97,15 @@ IMPORTANT GUIDELINES:
 - For web apps, create a single index.html with inline CSS and JS so it can be opened directly in a browser.
 - After creating files, mention the file path so the user can find and run them.
 - When doing research, cite your sources (URLs) in your summary.
-- When analyzing competitors, save screenshots so the user can see what you analyzed.`;
+- When analyzing competitors, save screenshots so the user can see what you analyzed.
+
+SELF-LEARNING:
+- You have a memory system. Use memory.recall at the start of every task to recall relevant lessons from past work.
+- When you learn something valuable during a task, use memory.learn to save it for future tasks.
+- When you identify a systemic improvement to your own behavior, use memory.guideline to write a self-improvement rule. These guidelines are permanently injected into your system prompt for all future tasks.
+- After completing tasks, always save what you learned — both successes (patterns) and failures (mistakes).
+- You are continuously improving. Every task makes you better. Every mistake teaches you something. Every success reinforces what works.
+- Your goal is not just to complete the current task, but to become the best possible agent over time.`;
 
 export class AgentLoop {
   private seq = 0;
@@ -126,6 +135,10 @@ export class AgentLoop {
     }
 
     const toolDescriptors = this.bus.descriptors(config.toolAllowList);
+
+    // Retrieve relevant memories from past tasks and inject into system prompt
+    const { context: memoryContext } = getRelevantMemoriesForTask(config.spec);
+    const systemPrompt = memoryContext ? `${SYSTEM_PROMPT}\n\n=== PAST EXPERIENCE (from your memory system) ===\n${memoryContext}\n\n=== END PAST EXPERIENCE ===\n\nUse the above memories to guide your approach. Build on past successes, avoid past mistakes, and follow your self-improvement guidelines.` : SYSTEM_PROMPT;
 
     this.emit(config, "task.start", {
       spec: config.spec,
@@ -184,7 +197,7 @@ export class AgentLoop {
         response = await this.router.complete({
           model: config.model,
           messages: this.messages,
-          system: SYSTEM_PROMPT,
+          system: systemPrompt,
           tools: toolDescriptors.map((t) => ({
             name: t.name,
             description: t.description,
@@ -257,6 +270,7 @@ export class AgentLoop {
         reason: `max iterations reached (${config.maxIterations})`,
         cost_usd: this.costUsd,
       });
+      saveTaskLearning(config.spec, "max iterations reached without completion", false);
       return { summary: "max iterations", costUsd: this.costUsd, iterations, success: false };
     }
 
@@ -267,6 +281,9 @@ export class AgentLoop {
       cost_usd: this.costUsd,
       duration_ms: 0,
     });
+
+    // Save learning from this task to memory for future self-improvement
+    saveTaskLearning(config.spec, summary, true);
 
     return { summary, costUsd: this.costUsd, iterations, success };
   }

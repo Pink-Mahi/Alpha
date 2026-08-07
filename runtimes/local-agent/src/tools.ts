@@ -12,6 +12,7 @@ import { $, Glob } from "bun";
 import { readFile, writeFile, readdir, stat, mkdir } from "node:fs/promises";
 import { join, relative, isAbsolute } from "node:path";
 import { browserNavigate, browserScreenshot, browserClick, browserFill, browserExtract, browserGetHtml, browserAnalyzeSeo, browserScroll, browserListElements, browserWait } from "./browserTools.js";
+import { memoryRecall, memoryLearn, memoryGuideline, memoryList } from "./memoryTools.js";
 
 import type { ToolDef, ToolContext } from "./toolBus.js";
 
@@ -392,4 +393,9 @@ export function registerBuiltinTools(bus: import("./toolBus.js").ToolBus): void 
   bus.register(browserScroll);
   bus.register(browserListElements);
   bus.register(browserWait);
+  // Memory tools (self-learning)
+  bus.register(memoryRecall);
+  bus.register(memoryLearn);
+  bus.register(memoryGuideline);
+  bus.register(memoryList);
 }
