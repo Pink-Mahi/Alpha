@@ -603,12 +603,17 @@ function EventRow({ event }: { event: AgentEvent }) {
       const tool = event.payload.tool as string;
       const args = event.payload.args as Record<string, unknown>;
       const argPreview = Object.entries(args).slice(0, 2).map(([k, v]) => `${k}: ${truncate(v, 50)}`).join(", ");
-      // Special icons for browser tools
+      // Special icons for tool types
       const isBrowser = tool.startsWith("browser.");
       const isWeb = tool.startsWith("web.");
       const isMemory = tool.startsWith("memory.");
-      const icon = isBrowser ? "🌐" : isWeb ? "🔍" : isMemory ? "🧠" : "🔧";
-      const color = isBrowser ? "#1f6feb" : isWeb ? "#a371f7" : isMemory ? "#238636" : "#d29922";
+      const isVision = tool.startsWith("vision.");
+      const isCode = tool === "code.run";
+      const isHttp = tool.startsWith("http.");
+      const isDeploy = tool.startsWith("deploy.");
+      const isImage = tool.startsWith("image.");
+      const icon = isBrowser ? "🌐" : isWeb ? "🔍" : isMemory ? "🧠" : isVision ? "👁" : isCode ? "⚡" : isHttp ? "📡" : isDeploy ? "�" : isImage ? "🎨" : "�🔧";
+      const color = isBrowser ? "#1f6feb" : isWeb ? "#a371f7" : isMemory ? "#238636" : isVision ? "#f0883e" : isCode ? "#d29922" : isHttp ? "#1f6feb" : isDeploy ? "#238636" : isImage ? "#f0883e" : "#d29922";
       return (
         <div style={{ fontSize: "0.8125rem", color, marginBottom: "0.25rem", paddingLeft: "0.5rem" }}>
           {icon} {tool}({argPreview}{Object.keys(args).length > 2 ? "..." : ""})

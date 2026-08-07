@@ -13,6 +13,8 @@ import { readFile, writeFile, readdir, stat, mkdir } from "node:fs/promises";
 import { join, relative, isAbsolute } from "node:path";
 import { browserNavigate, browserScreenshot, browserClick, browserFill, browserExtract, browserGetHtml, browserAnalyzeSeo, browserScroll, browserListElements, browserWait } from "./browserTools.js";
 import { memoryRecall, memoryLearn, memoryGuideline, memoryList } from "./memoryTools.js";
+import { codeRun, httpRequest, fsEdit, deployStatic, createVisionTool, createImageGenTool } from "./advancedTools.js";
+import type { ModelRouterClient } from "./modelRouterClient.js";
 
 import type { ToolDef, ToolContext } from "./toolBus.js";
 
@@ -370,7 +372,7 @@ export const webFetch: ToolDef = {
 };
 
 /** Register all built-in tools on a ToolBus. */
-export function registerBuiltinTools(bus: import("./toolBus.js").ToolBus): void {
+export function registerBuiltinTools(bus: import("./toolBus.js").ToolBus, router?: ModelRouterClient, defaultModel?: string, apiKey?: string): void {
   bus.register(fsRead);
   bus.register(fsWrite);
   bus.register(fsList);
@@ -398,4 +400,13 @@ export function registerBuiltinTools(bus: import("./toolBus.js").ToolBus): void 
   bus.register(memoryLearn);
   bus.register(memoryGuideline);
   bus.register(memoryList);
+  // Advanced tools (Tier 1)
+  bus.register(codeRun);
+  bus.register(httpRequest);
+  bus.register(fsEdit);
+  bus.register(deployStatic);
+  if (router) {
+    bus.register(createVisionTool(router, defaultModel ?? "openai:gpt-4o", apiKey));
+    bus.register(createImageGenTool(router, apiKey));
+  }
 }

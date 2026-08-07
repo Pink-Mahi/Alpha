@@ -24,10 +24,9 @@ import { registerBuiltinTools } from "./tools.js";
 const app = new Hono();
 app.use("*", logger());
 
-const bus = new ToolBus();
-registerBuiltinTools(bus);
-
 const router = new ModelRouterClient(process.env.MODEL_ROUTER_URL ?? "http://localhost:8081");
+const bus = new ToolBus();
+registerBuiltinTools(bus, router, "openai:gpt-4o", process.env.OPENAI_API_KEY);
 
 interface RunningTask {
   id: string;
@@ -92,6 +91,7 @@ app.post("/v1/agent/start", async (c) => {
       "browser.extract", "browser.get_html", "browser.analyze_seo",
       "browser.scroll", "browser.list_elements", "browser.wait",
       "memory.recall", "memory.learn", "memory.guideline", "memory.list",
+      "vision.analyze", "code.run", "http.request", "fs.edit", "deploy.static", "image.generate",
     ]),
     onEvent: (env) => events.push(env),
     requestApproval: async (tool, args, reason) => {
@@ -271,6 +271,7 @@ Original task: ${body.spec}`;
         "browser.extract", "browser.get_html", "browser.analyze_seo",
         "browser.scroll", "browser.list_elements", "browser.wait",
       "memory.recall", "memory.learn", "memory.guideline", "memory.list",
+      "vision.analyze", "code.run", "http.request", "fs.edit", "deploy.static", "image.generate",
       ]),
       reflectionInterval: 5,
       externalContext: [],
@@ -365,6 +366,7 @@ You are the last line of defense for quality. Be demanding. Be thorough. Be proa
           "browser.extract", "browser.get_html", "browser.analyze_seo",
           "browser.scroll", "browser.list_elements", "browser.wait",
       "memory.recall", "memory.learn", "memory.guideline", "memory.list",
+      "vision.analyze", "code.run", "http.request", "fs.edit", "deploy.static", "image.generate",
         ]),
         reflectionInterval: 3,
         onEvent: (env) => supEvents.push(env),
