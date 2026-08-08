@@ -22,6 +22,7 @@ import {
   codeAnalyze, securityScan, docsGenerate, projectScaffold, dataTransform, pkgInstall,
 } from "./tier3Tools.js";
 import { mathSolve, mathCalculate, physicsSolve, chemistrySolve, scienceConstant } from "./scienceTools.js";
+import { medicalSymptoms, medicalDrug, medicalAnatomy, medicalLab } from "./medicalTools.js";
 import type { ModelRouterClient } from "./modelRouterClient.js";
 
 import type { ToolDef, ToolContext } from "./toolBus.js";
@@ -452,4 +453,9 @@ export function registerBuiltinTools(bus: import("./toolBus.js").ToolBus, router
   bus.register(physicsSolve);
   bus.register(chemistrySolve);
   bus.register(scienceConstant);
+  // Medical tools
+  bus.register(medicalSymptoms);
+  bus.register(medicalDrug);
+  bus.register(medicalAnatomy);
+  bus.register(medicalLab);
 }
