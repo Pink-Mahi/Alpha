@@ -28,6 +28,7 @@ import { financeCalculate, economicsIndicators } from "./financeTools.js";
 import { statsDescribe, statsHypothesisTest, statsRegression, statsDistribution } from "./statisticsTools.js";
 import { mechanicalSolve, fluidMechanics, heatTransfer } from "./mechanicalTools.js";
 import { astronomySolve } from "./astronomyTools.js";
+import { cryptoHash, cryptoEncode, cryptoCipher } from "./cryptoTools.js";
 import type { ModelRouterClient } from "./modelRouterClient.js";
 
 import type { ToolDef, ToolContext } from "./toolBus.js";
@@ -482,4 +483,8 @@ export function registerBuiltinTools(bus: import("./toolBus.js").ToolBus, router
   bus.register(heatTransfer);
   // Astronomy tools
   bus.register(astronomySolve);
+  // Cryptography tools
+  bus.register(cryptoHash);
+  bus.register(cryptoEncode);
+  bus.register(cryptoCipher);
 }
