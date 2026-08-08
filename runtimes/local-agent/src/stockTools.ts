@@ -2256,3 +2256,403 @@ export const stockStrategies: ToolDef = {
     }
   },
 };
+
+// =============================================================================
+// STOCK MARKET — Global market overview (indices, commodities, VIX, bonds, FX)
+// =============================================================================
+
+// Yahoo Finance symbols for global markets
+const MARKET_SYMBOLS: Record<string, { symbol: string; name: string; region: string; currency: string }> = {
+  // US Indices
+  "SPY": { symbol: "SPY", name: "S&P 500 ETF", region: "US", currency: "USD" },
+  "QQQ": { symbol: "QQQ", name: "Nasdaq 100 ETF", region: "US", currency: "USD" },
+  "DIA": { symbol: "DIA", name: "Dow Jones ETF", region: "US", currency: "USD" },
+  "IWM": { symbol: "IWM", name: "Russell 2000 (Small Cap)", region: "US", currency: "USD" },
+  "VIX": { symbol: "^VIX", name: "Volatility Index (Fear Gauge)", region: "US", currency: "USD" },
+  // European Indices
+  "FTSE": { symbol: "^FTSE", name: "FTSE 100 (UK)", region: "Europe", currency: "GBP" },
+  "DAX": { symbol: "^GDAXI", name: "DAX (Germany)", region: "Europe", currency: "EUR" },
+  "CAC": { symbol: "^FCHI", name: "CAC 40 (France)", region: "Europe", currency: "EUR" },
+  "SMI": { symbol: "^SSMI", name: "SMI (Switzerland)", region: "Europe", currency: "CHF" },
+  "FTSEMIB": { symbol: "FTSEMIB.MI", name: "FTSE MIB (Italy)", region: "Europe", currency: "EUR" },
+  "IBEX": { symbol: "^IBEX", name: "IBEX 35 (Spain)", region: "Europe", currency: "EUR" },
+  // Asian Indices
+  "N225": { symbol: "^N225", name: "Nikkei 225 (Japan)", region: "Asia", currency: "JPY" },
+  "HSI": { symbol: "^HSI", name: "Hang Seng (Hong Kong)", region: "Asia", currency: "HKD" },
+  "SSEC": { symbol: "000001.SS", name: "Shanghai Composite (China)", region: "Asia", currency: "CNY" },
+  "BSESN": { symbol: "^BSESN", name: "Sensex (India)", region: "Asia", currency: "INR" },
+  "KS11": { symbol: "^KS11", name: "KOSPI (South Korea)", region: "Asia", currency: "KRW" },
+  "TWII": { symbol: "^TWII", name: "Taiwan Weighted", region: "Asia", currency: "TWD" },
+  "AXJO": { symbol: "^AXJO", name: "ASX 200 (Australia)", region: "Asia", currency: "AUD" },
+  // Americas
+  "GSPTSE": { symbol: "^GSPTSE", name: "S&P/TSX (Canada)", region: "Americas", currency: "CAD" },
+  "BVSP": { symbol: "^BVSP", name: "Bovespa (Brazil)", region: "Americas", currency: "BRL" },
+  "MXX": { symbol: "^MXX", name: "IPC (Mexico)", region: "Americas", currency: "MXN" },
+  // Commodities
+  "GOLD": { symbol: "GC=F", name: "Gold Futures", region: "Commodity", currency: "USD" },
+  "SILVER": { symbol: "SI=F", name: "Silver Futures", region: "Commodity", currency: "USD" },
+  "OIL": { symbol: "CL=F", name: "Crude Oil WTI Futures", region: "Commodity", currency: "USD" },
+  "BRENT": { symbol: "BZ=F", name: "Brent Oil Futures", region: "Commodity", currency: "USD" },
+  "NATGAS": { symbol: "NG=F", name: "Natural Gas Futures", region: "Commodity", currency: "USD" },
+  "COPPER": { symbol: "HG=F", name: "Copper Futures", region: "Commodity", currency: "USD" },
+  "WHEAT": { symbol: "ZW=F", name: "Wheat Futures", region: "Commodity", currency: "USD" },
+  "CORN": { symbol: "ZC=F", name: "Corn Futures", region: "Commodity", currency: "USD" },
+  // Bonds / Rates
+  "TNX": { symbol: "^TNX", name: "10Y Treasury Yield", region: "Bonds", currency: "USD" },
+  "TYX": { symbol: "^TYX", name: "30Y Treasury Yield", region: "Bonds", currency: "USD" },
+  "FVX": { symbol: "^FVX", name: "5Y Treasury Yield", region: "Bonds", currency: "USD" },
+  // FX
+  "DXY": { symbol: "DX-Y.NYB", name: "US Dollar Index", region: "FX", currency: "USD" },
+  "EURUSD": { symbol: "EURUSD=X", name: "EUR/USD", region: "FX", currency: "USD" },
+  "GBPUSD": { symbol: "GBPUSD=X", name: "GBP/USD", region: "FX", currency: "USD" },
+  "USDJPY": { symbol: "USDJPY=X", name: "USD/JPY", region: "FX", currency: "JPY" },
+  // Crypto
+  "BTC": { symbol: "BTC-USD", name: "Bitcoin", region: "Crypto", currency: "USD" },
+  "ETH": { symbol: "ETH-USD", name: "Ethereum", region: "Crypto", currency: "USD" },
+};
+
+export const stockMarket: ToolDef = {
+  name: "stock.market",
+  description: "Global market overview fetching ALL major world indices (US, Europe, Asia, Americas), commodities (gold, silver, oil, copper, wheat, corn), bond yields (5Y/10Y/30Y), FX (dollar index, EUR/USD, GBP/USD, USD/JPY), VIX (fear gauge), and crypto (BTC, ETH) in real-time from Yahoo Finance. Calculates overall market sentiment (risk-on/risk-off), regional trends, correlation analysis, and macro risk signals. Essential for understanding if global markets are rallying or selling off before making single-stock predictions.",
+  inputSchema: z.object({
+    operation: z.enum(["overview", "regional", "commodities", "bonds", "fx", "crypto", "sentiment", "correlation", "list"]).describe("Market operation"),
+    region: z.enum(["US", "Europe", "Asia", "Americas", "Commodity", "Bonds", "FX", "Crypto"]).optional().describe("Filter by region (for 'regional')"),
+  }),
+  outputSchema: z.object({
+    success: z.boolean(),
+    result: z.string(),
+    markets: z.record(z.any()).optional(),
+    sentiment: z.record(z.any()).optional(),
+    steps: z.array(z.string()),
+    message: z.string(),
+  }),
+  permissionsRequired: [],
+  sideEffect: "read",
+  requiresApproval: false,
+  async execute(params) {
+    const steps: string[] = [];
+
+    try {
+      if (params.operation === "list") {
+        const list = [
+          "overview: All major indices, commodities, bonds, FX, crypto + overall sentiment",
+          "regional: Filter by region (US, Europe, Asia, Americas, Commodity, Bonds, FX, Crypto)",
+          "commodities: Gold, silver, oil, brent, natgas, copper, wheat, corn",
+          "bonds: US Treasury yields (5Y, 10Y, 30Y)",
+          "fx: Dollar index, EUR/USD, GBP/USD, USD/JPY",
+          "crypto: Bitcoin, Ethereum",
+          "sentiment: Risk-on/risk-off analysis with VIX, dollar, gold, bonds",
+          "correlation: Cross-asset correlation analysis",
+        ].join("\n");
+        return { success: true, result: list, steps, message: "Available market operations" };
+      }
+
+      // Helper: fetch multiple quotes from Yahoo Finance
+      async function fetchQuotes(symbols: Array<{ key: string; symbol: string; name: string; region: string; currency: string }>): Promise<Array<{ key: string; name: string; region: string; price: number; change: number; changePct: number; currency: string }>> {
+        const results: Array<{ key: string; name: string; region: string; price: number; change: number; changePct: number; currency: string }> = [];
+        // Fetch in parallel batches of 5
+        for (let i = 0; i < symbols.length; i += 5) {
+          const batch = symbols.slice(i, i + 5);
+          const promises = batch.map(async (s) => {
+            try {
+              const url = `https://query1.finance.yahoo.com/v8/finance/chart/${s.symbol}?range=1d&interval=1d`;
+              const resp = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } });
+              if (!resp.ok) return null;
+              const data = await resp.json() as any;
+              const meta = data?.chart?.result?.[0]?.meta;
+              if (!meta) return null;
+              const price = meta.regularMarketPrice;
+              const prev = meta.chartPreviousClose ?? price;
+              return {
+                key: s.key,
+                name: s.name,
+                region: s.region,
+                price,
+                change: price - prev,
+                changePct: prev > 0 ? ((price - prev) / prev) * 100 : 0,
+                currency: s.currency,
+              };
+            } catch {
+              return null;
+            }
+          });
+          const batchResults = await Promise.all(promises);
+          for (const r of batchResults) {
+            if (r) results.push(r);
+          }
+        }
+        return results;
+      }
+
+      // Determine which symbols to fetch
+      let symbolsToFetch: Array<{ key: string; symbol: string; name: string; region: string; currency: string }>;
+      switch (params.operation) {
+        case "regional":
+          symbolsToFetch = Object.entries(MARKET_SYMBOLS)
+            .filter(([, v]) => v.region === params.region)
+            .map(([k, v]) => ({ key: k, ...v }));
+          break;
+        case "commodities":
+          symbolsToFetch = Object.entries(MARKET_SYMBOLS)
+            .filter(([, v]) => v.region === "Commodity")
+            .map(([k, v]) => ({ key: k, ...v }));
+          break;
+        case "bonds":
+          symbolsToFetch = Object.entries(MARKET_SYMBOLS)
+            .filter(([, v]) => v.region === "Bonds")
+            .map(([k, v]) => ({ key: k, ...v }));
+          break;
+        case "fx":
+          symbolsToFetch = Object.entries(MARKET_SYMBOLS)
+            .filter(([, v]) => v.region === "FX")
+            .map(([k, v]) => ({ key: k, ...v }));
+          break;
+        case "crypto":
+          symbolsToFetch = Object.entries(MARKET_SYMBOLS)
+            .filter(([, v]) => v.region === "Crypto")
+            .map(([k, v]) => ({ key: k, ...v }));
+          break;
+        default:
+          symbolsToFetch = Object.entries(MARKET_SYMBOLS).map(([k, v]) => ({ key: k, ...v }));
+      }
+
+      steps.push(`Fetching ${symbolsToFetch.length} market quotes from Yahoo Finance...`);
+      const quotes = await fetchQuotes(symbolsToFetch);
+
+      if (quotes.length === 0) {
+        return { success: false, result: "", steps, message: "Failed to fetch any market data" };
+      }
+
+      steps.push(`Retrieved ${quotes.length}/${symbolsToFetch.length} quotes`);
+
+      // Build market data object
+      const markets: Record<string, any> = {};
+      for (const q of quotes) {
+        markets[q.key] = {
+          name: q.name,
+          region: q.region,
+          price: q.price,
+          change: q.change,
+          change_pct: q.changePct,
+          currency: q.currency,
+          direction: q.change > 0 ? "UP" : q.change < 0 ? "DOWN" : "FLAT",
+        };
+      }
+
+      // ================================================================
+      // SENTIMENT ANALYSIS
+      // ================================================================
+      if (params.operation === "sentiment" || params.operation === "overview") {
+        const upCount = quotes.filter((q) => q.change > 0).length;
+        const downCount = quotes.filter((q) => q.change < 0).length;
+        const flatCount = quotes.filter((q) => q.change === 0).length;
+        const upPct = (upCount / quotes.length) * 100;
+
+        // VIX analysis
+        const vix = markets.VIX;
+        let vixLevel = "NORMAL";
+        let vixSignal = "Neutral";
+        if (vix) {
+          if (vix.price > 30) { vixLevel = "HIGH (FEAR)"; vixSignal = "Risk-off — investors fearful, consider defensive plays"; }
+          else if (vix.price > 20) { vixLevel = "ELEVATED"; vixSignal = "Cautious — elevated volatility, good for premium selling"; }
+          else if (vix.price < 12) { vixLevel = "LOW (COMPLACENT)"; vixSignal = "Risk-on — low fear, premium may be thin"; }
+          else { vixLevel = "NORMAL"; vixSignal = "Balanced — normal market conditions"; }
+        }
+
+        // Dollar analysis
+        const dxy = markets.DXY;
+        let dollarSignal = "Neutral";
+        if (dxy) {
+          if (dxy.change > 0) dollarSignal = "Dollar strengthening — pressure on commodities and foreign stocks";
+          else if (dxy.change < 0) dollarSignal = "Dollar weakening — supportive for commodities and emerging markets";
+        }
+
+        // Gold analysis
+        const gold = markets.GOLD;
+        let goldSignal = "Neutral";
+        if (gold) {
+          if (gold.change > 0) goldSignal = "Gold up — safe haven demand, risk-off signal";
+          else if (gold.change < 0) goldSignal = "Gold down — risk appetite, risk-on signal";
+        }
+
+        // Bonds analysis
+        const tnx = markets.TNX;
+        let bondSignal = "Neutral";
+        if (tnx) {
+          if (tnx.change > 0) bondSignal = `Yields rising (${tnx.price.toFixed(2)}%) — growth expectations or inflation concerns`;
+          else if (tnx.change < 0) bondSignal = `Yields falling (${tnx.price.toFixed(2)}%) — flight to safety or recession fears`;
+        }
+
+        // Oil analysis
+        const oil = markets.OIL;
+        let oilSignal = "Neutral";
+        if (oil) {
+          if (oil.changePct > 2) oilSignal = "Oil surging — inflation pressure, energy stocks benefit";
+          else if (oil.changePct < -2) oilSignal = "Oil dropping — deflation pressure, consumer stocks benefit";
+        }
+
+        // Overall sentiment
+        let sentiment: "RISK-ON" | "RISK-OFF" | "MIXED";
+        let sentimentDesc: string;
+        const riskOnSignals = [
+          upPct > 60,
+          vix && vix.price < 20,
+          gold && gold.change < 0,
+          dxy && dxy.change < 0,
+        ].filter(Boolean).length;
+        const riskOffSignals = [
+          upPct < 40,
+          vix && vix.price > 25,
+          gold && gold.change > 0,
+          dxy && dxy.change > 0,
+        ].filter(Boolean).length;
+
+        if (riskOnSignals >= 3) {
+          sentiment = "RISK-ON";
+          sentimentDesc = "Markets in risk-on mode — stocks rising, volatility low, gold down. Good for bullish strategies and selling puts.";
+        } else if (riskOffSignals >= 3) {
+          sentiment = "RISK-OFF";
+          sentimentDesc = "Markets in risk-off mode — stocks falling, volatility rising, gold up. Defensive posture, consider protective puts and credit spreads.";
+        } else {
+          sentiment = "MIXED";
+          sentimentDesc = "Mixed signals — no clear directional bias. Range-bound strategies (iron condors, calendars) may be optimal.";
+        }
+
+        const sentimentData = {
+          overall: sentiment,
+          description: sentimentDesc,
+          up_count: upCount,
+          down_count: downCount,
+          flat_count: flatCount,
+          up_pct: upPct,
+          vix: vix ? { price: vix.price, level: vixLevel, signal: vixSignal } : null,
+          dollar: dxy ? { price: dxy.price, signal: dollarSignal } : null,
+          gold: gold ? { price: gold.price, signal: goldSignal } : null,
+          bonds: tnx ? { yield: tnx.price, signal: bondSignal } : null,
+          oil: oil ? { price: oil.price, signal: oilSignal } : null,
+          risk_on_signals: riskOnSignals,
+          risk_off_signals: riskOffSignals,
+        };
+
+        if (params.operation === "sentiment") {
+          steps.push(`=== GLOBAL MARKET SENTIMENT ===`);
+          steps.push(`  Overall: ${sentiment}`);
+          steps.push(`  ${sentimentDesc}`);
+          steps.push(``);
+          steps.push(`  Markets up: ${upCount} | Down: ${downCount} | Flat: ${flatCount} (${upPct.toFixed(0)}% up)`);
+          if (vix) steps.push(`  VIX: ${vix.price.toFixed(2)} — ${vixLevel} — ${vixSignal}`);
+          if (dxy) steps.push(`  Dollar (DXY): ${dxy.price.toFixed(2)} — ${dollarSignal}`);
+          if (gold) steps.push(`  Gold: $${gold.price.toFixed(2)} — ${goldSignal}`);
+          if (tnx) steps.push(`  10Y Yield: ${tnx.price.toFixed(2)}% — ${bondSignal}`);
+          if (oil) steps.push(`  Oil: $${oil.price.toFixed(2)} (${oil.changePct.toFixed(2)}%) — ${oilSignal}`);
+          steps.push(``);
+          steps.push(`  Risk-on signals: ${riskOnSignals} | Risk-off signals: ${riskOffSignals}`);
+          steps.push(``);
+          steps.push(`  TRADING IMPLICATION:`);
+          if (sentiment === "RISK-ON") {
+            steps.push(`    → Favored: Sell cash-secured puts, bull put spreads, covered calls`);
+            steps.push(`    → Avoid: Bear call spreads, heavy hedging`);
+          } else if (sentiment === "RISK-OFF") {
+            steps.push(`    → Favored: Bear call spreads, protective puts, cash-secured puts at lower strikes`);
+            steps.push(`    → Avoid: Naked puts (unless wanting assignment), short straddles`);
+            steps.push(`    → VIX elevated: Good for selling premium (IV is high)`);
+          } else {
+            steps.push(`    → Favored: Iron condors, calendar spreads, neutral strategies`);
+            steps.push(`    → Range-bound market — ideal for premium collection`);
+          }
+          return { success: true, result: `${sentiment} (${upPct.toFixed(0)}% up, VIX ${vix?.price.toFixed(1) ?? "N/A"})`, markets, sentiment: sentimentData, steps, message: `Global sentiment: ${sentiment} — ${sentimentDesc.substring(0, 80)}` };
+        }
+      }
+
+      // ================================================================
+      // CORRELATION ANALYSIS
+      // ================================================================
+      if (params.operation === "correlation") {
+        steps.push(`=== CROSS-ASSET CORRELATION ANALYSIS ===`);
+        const usIndices = quotes.filter((q) => q.region === "US" && q.key !== "VIX");
+        const euIndices = quotes.filter((q) => q.region === "Europe");
+        const asiaIndices = quotes.filter((q) => q.region === "Asia");
+        const commodities = quotes.filter((q) => q.region === "Commodity");
+
+        const usAvg = usIndices.length > 0 ? usIndices.reduce((s, q) => s + q.changePct, 0) / usIndices.length : 0;
+        const euAvg = euIndices.length > 0 ? euIndices.reduce((s, q) => s + q.changePct, 0) / euIndices.length : 0;
+        const asiaAvg = asiaIndices.length > 0 ? asiaIndices.reduce((s, q) => s + q.changePct, 0) / asiaIndices.length : 0;
+        const commAvg = commodities.length > 0 ? commodities.reduce((s, q) => s + q.changePct, 0) / commodities.length : 0;
+
+        steps.push(`  US indices avg: ${usAvg.toFixed(2)}%`);
+        steps.push(`  European indices avg: ${euAvg.toFixed(2)}%`);
+        steps.push(`  Asian indices avg: ${asiaAvg.toFixed(2)}%`);
+        steps.push(`  Commodities avg: ${commAvg.toFixed(2)}%`);
+        steps.push(``);
+
+        const allPositive = usAvg > 0 && euAvg > 0 && asiaAvg > 0;
+        const allNegative = usAvg < 0 && euAvg < 0 && asiaAvg < 0;
+        const divergence = Math.abs(usAvg - euAvg) > 1.5 || Math.abs(usAvg - asiaAvg) > 1.5;
+
+        if (allPositive) {
+          steps.push(`  ✓ GLOBAL RALLY: All regions positive — broad risk-on sentiment`);
+          steps.push(`    Implication: Individual stocks likely supported by macro tailwinds`);
+        } else if (allNegative) {
+          steps.push(`  ✗ GLOBAL SELLOFF: All regions negative — broad risk-off sentiment`);
+          steps.push(`    Implication: Individual stocks face macro headwinds, consider defensive plays`);
+        } else if (divergence) {
+          steps.push(`  ⚠ REGIONAL DIVERGENCE: Markets moving in different directions`);
+          steps.push(`    Implication: Stock-specific factors matter more than macro — selective approach needed`);
+        } else {
+          steps.push(`  ~ MIXED: Regions mostly aligned but modest moves`);
+          steps.push(`    Implication: Normal market — focus on individual stock analysis`);
+        }
+
+        // Commodity-stock relationship
+        const vix = markets.VIX;
+        if (vix && vix.price > 25) {
+          steps.push(`  ⚠ HIGH VIX (${vix.price.toFixed(1)}): Elevated fear — all correlations tend toward 1 in crisis`);
+        }
+
+        return {
+          success: true,
+          result: `US=${usAvg.toFixed(2)}%, EU=${euAvg.toFixed(2)}%, Asia=${asiaAvg.toFixed(2)}%, Comm=${commAvg.toFixed(2)}%`,
+          markets,
+          sentiment: { us_avg: usAvg, eu_avg: euAvg, asia_avg: asiaAvg, commodity_avg: commAvg, all_positive: allPositive, all_negative: allNegative, divergence },
+          steps,
+          message: allPositive ? "Global rally — all regions up" : allNegative ? "Global selloff — all regions down" : divergence ? "Regional divergence detected" : "Mixed/modest moves across regions",
+        };
+      }
+
+      // ================================================================
+      // DEFAULT: OVERVIEW or REGIONAL
+      // ================================================================
+      steps.push(`=== GLOBAL MARKET OVERVIEW ===`);
+      const regions = [...new Set(quotes.map((q) => q.region))];
+      for (const region of regions.sort()) {
+        steps.push(``);
+        steps.push(`--- ${region.toUpperCase()} ---`);
+        const regionQuotes = quotes.filter((q) => q.region === region);
+        for (const q of regionQuotes) {
+          const arrow = q.change > 0 ? "▲" : q.change < 0 ? "▼" : "→";
+          steps.push(`  ${arrow} ${q.key}: ${q.price.toFixed(2)} ${q.currency} (${q.changePct > 0 ? "+" : ""}${q.changePct.toFixed(2)}%) — ${q.name}`);
+        }
+      }
+
+      // Quick sentiment summary
+      const upCount = quotes.filter((q) => q.change > 0).length;
+      const downCount = quotes.filter((q) => q.change < 0).length;
+      const vix = markets.VIX;
+      steps.push(``);
+      steps.push(`--- SUMMARY ---`);
+      steps.push(`  Up: ${upCount} | Down: ${downCount} | Flat: ${quotes.length - upCount - downCount}`);
+      if (vix) steps.push(`  VIX: ${vix.price.toFixed(2)} ${vix.price > 25 ? "(FEAR)" : vix.price < 15 ? "(COMPLACENT)" : "(NORMAL)"}`);
+      steps.push(`  Sentiment: ${upCount > downCount * 1.5 ? "RISK-ON (broad rally)" : downCount > upCount * 1.5 ? "RISK-OFF (broad selloff)" : "MIXED"}`);
+
+      return {
+        success: true,
+        result: `${quotes.length} markets: ${upCount} up, ${downCount} down`,
+        markets,
+        steps,
+        message: `Global overview: ${upCount} up, ${downCount} down${vix ? `, VIX ${vix.price.toFixed(1)}` : ""}`,
+      };
+    } catch (e: any) {
+      return { success: false, result: "", steps, message: e.message ?? String(e) };
+    }
+  },
+};
