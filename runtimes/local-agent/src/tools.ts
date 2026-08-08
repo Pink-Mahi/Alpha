@@ -32,7 +32,7 @@ import { cryptoHash, cryptoEncode, cryptoCipher } from "./cryptoTools.js";
 import { geoDistance, geoTimezone } from "./geoTools.js";
 import { textAnalyze, textSummarize } from "./textTools.js";
 import { sysProcess, sysNetwork, sysCron } from "./sysadminTools.js";
-import { stockIndicators, stockOptions } from "./stockTools.js";
+import { stockIndicators, stockOptions, stockData } from "./stockTools.js";
 import type { ModelRouterClient } from "./modelRouterClient.js";
 
 import type { ToolDef, ToolContext } from "./toolBus.js";
@@ -504,4 +504,5 @@ export function registerBuiltinTools(bus: import("./toolBus.js").ToolBus, router
   // Stock trading tools
   bus.register(stockIndicators);
   bus.register(stockOptions);
+  bus.register(stockData);
 }

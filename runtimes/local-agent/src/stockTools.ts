@@ -1145,3 +1145,291 @@ export const stockOptions: ToolDef = {
     }
   },
 };
+
+// =============================================================================
+// STOCK DATA — Fetch OHLCV data from Yahoo Finance (free, no API key)
+// =============================================================================
+
+export const stockData: ToolDef = {
+  name: "stock.data",
+  description: "Fetch real-time and historical stock market data from Yahoo Finance (free, no API key needed). Get current quote (price, change, volume, market cap, P/E, 52-week range), historical OHLCV bars (1d/1wk/1mo intervals), options chain (calls/puts with strikes and premiums), and dividend history. Essential for feeding data into stock.indicators and stock.options.",
+  inputSchema: z.object({
+    operation: z.enum(["quote", "history", "options_chain", "dividends", "list"]).describe("Data operation"),
+    symbol: z.string().optional().describe("Stock ticker symbol (e.g. AAPL, MSFT, SPY)"),
+    period: z.enum(["1d", "5d", "1mo", "3mo", "6mo", "1y", "2y", "5y", "10y", "ytd", "max"]).default("3mo").describe("Time period for historical data"),
+    interval: z.enum(["1m", "2m", "5m", "15m", "30m", "60m", "1d", "1wk", "1mo"]).default("1d").describe("Bar interval"),
+    expiration: z.string().optional().describe("Options expiration date (YYYY-MM-DD)"),
+  }),
+  outputSchema: z.object({
+    success: z.boolean(),
+    result: z.string(),
+    quote: z.record(z.any()).optional(),
+    history: z.array(z.object({
+      date: z.string(),
+      open: z.number(),
+      high: z.number(),
+      low: z.number(),
+      close: z.number(),
+      volume: z.number(),
+    })).optional(),
+    options: z.record(z.any()).optional(),
+    dividends: z.array(z.object({
+      date: z.string(),
+      dividend: z.number(),
+    })).optional(),
+    steps: z.array(z.string()),
+    message: z.string(),
+  }),
+  permissionsRequired: [],
+  sideEffect: "read",
+  requiresApproval: false,
+  async execute(params) {
+    const steps: string[] = [];
+
+    try {
+      if (params.operation === "list") {
+        const list = [
+          "quote: Current price, change, volume, market cap, P/E, 52-week range",
+          "history: Historical OHLCV bars (specify period and interval)",
+          "options_chain: Calls/puts with strikes, premiums, volume, open interest",
+          "dividends: Dividend history",
+        ].join("\n");
+        return { success: true, result: list, steps, message: "Available data operations" };
+      }
+
+      if (!params.symbol) {
+        return { success: false, result: "", steps, message: "Provide symbol (e.g. AAPL, MSFT, SPY)" };
+      }
+
+      const symbol = params.symbol.toUpperCase();
+      const chartUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}`;
+
+      switch (params.operation) {
+        // ================================================================
+        // QUOTE — Current price and key stats
+        // ================================================================
+        case "quote": {
+          const url = `${chartUrl}?range=1d&interval=1d`;
+          steps.push(`Fetching quote for ${symbol} from Yahoo Finance...`);
+          const resp = await fetch(url, {
+            headers: { "User-Agent": "Mozilla/5.0" },
+          });
+          if (!resp.ok) {
+            return { success: false, result: "", steps, message: `Yahoo Finance request failed (${resp.status}). Symbol may be invalid.` };
+          }
+          const data = await resp.json() as any;
+          const result = data?.chart?.result?.[0];
+          if (!result) {
+            return { success: false, result: "", steps, message: `No data returned for ${symbol}` };
+          }
+          const meta = result.meta;
+          const quote = {
+            symbol: meta.symbol,
+            currency: meta.currency,
+            exchange: meta.exchangeName,
+            current_price: meta.regularMarketPrice,
+            previous_close: meta.chartPreviousClose,
+            change: meta.regularMarketPrice - meta.chartPreviousClose,
+            change_pct: ((meta.regularMarketPrice - meta.chartPreviousClose) / meta.chartPreviousClose) * 100,
+            volume: meta.regularMarketVolume,
+            fifty_two_week_high: meta.fiftyTwoWeekHigh?.high,
+            fifty_two_week_low: meta.fiftyTwoWeekLow?.low,
+            market_cap: meta.marketCap,
+            regular_market_time: meta.regularMarketTime,
+          };
+
+          steps.push(`Quote for ${symbol}:`);
+          steps.push(`  Price: ${quote.currency === "USD" ? "$" : ""}${quote.current_price}`);
+          steps.push(`  Change: ${quote.change > 0 ? "+" : ""}${quote.change.toFixed(2)} (${quote.change_pct?.toFixed(2)}%)`);
+          steps.push(`  Volume: ${quote.volume?.toLocaleString() ?? "N/A"}`);
+          if (quote.fifty_two_week_high) steps.push(`  52-week range: ${quote.fifty_two_week_low} - ${quote.fifty_two_week_high}`);
+          if (quote.market_cap) steps.push(`  Market cap: $${(quote.market_cap / 1e9).toFixed(2)}B`);
+
+          return {
+            success: true,
+            result: `${symbol}: $${quote.current_price} (${quote.change_pct?.toFixed(2)}%)`,
+            quote,
+            steps,
+            message: `${symbol} at $${quote.current_price} (${quote.change_pct?.toFixed(2)}%)`,
+          };
+        }
+
+        // ================================================================
+        // HISTORY — Historical OHLCV bars
+        // ================================================================
+        case "history": {
+          const url = `${chartUrl}?range=${params.period}&interval=${params.interval}`;
+          steps.push(`Fetching ${params.period} of ${params.interval} bars for ${symbol}...`);
+          const resp = await fetch(url, {
+            headers: { "User-Agent": "Mozilla/5.0" },
+          });
+          if (!resp.ok) {
+            return { success: false, result: "", steps, message: `Yahoo Finance request failed (${resp.status})` };
+          }
+          const data = await resp.json() as any;
+          const result = data?.chart?.result?.[0];
+          if (!result) {
+            return { success: false, result: "", steps, message: `No data returned for ${symbol}` };
+          }
+          const timestamps: number[] = result.timestamp || [];
+          const q = result.indicators?.quote?.[0];
+          const ohlcv: Array<{ date: string; open: number; high: number; low: number; close: number; volume: number }> = [];
+          for (let i = 0; i < timestamps.length; i++) {
+            if (q?.close?.[i] == null) continue;
+            ohlcv.push({
+              date: new Date(timestamps[i]! * 1000).toISOString().split("T")[0]!,
+              open: q.open?.[i] ?? 0,
+              high: q.high?.[i] ?? 0,
+              low: q.low?.[i] ?? 0,
+              close: q.close?.[i] ?? 0,
+              volume: q.volume?.[i] ?? 0,
+            });
+          }
+
+          steps.push(`Retrieved ${ohlcv.length} bars for ${symbol}`);
+          if (ohlcv.length > 0) {
+            const last = ohlcv[ohlcv.length - 1]!;
+            const first = ohlcv[0]!;
+            steps.push(`  First: ${first.date} — close $${first.close}`);
+            steps.push(`  Last: ${last.date} — close $${last.close}`);
+            steps.push(`  Period return: ${(((last.close - first.close) / first.close) * 100).toFixed(2)}%`);
+          }
+
+          return {
+            success: true,
+            result: `${ohlcv.length} bars for ${symbol}`,
+            history: ohlcv,
+            steps,
+            message: `Retrieved ${ohlcv.length} OHLCV bars for ${symbol} (${params.period}, ${params.interval})`,
+          };
+        }
+
+        // ================================================================
+        // OPTIONS CHAIN — Calls and puts
+        // ================================================================
+        case "options_chain": {
+          if (!params.expiration) {
+            // First get available expirations
+            const url = `https://query1.finance.yahoo.com/v7/finance/options/${symbol}`;
+            steps.push(`Fetching available expirations for ${symbol}...`);
+            const resp = await fetch(url, {
+              headers: { "User-Agent": "Mozilla/5.0" },
+            });
+            if (!resp.ok) {
+              return { success: false, result: "", steps, message: `Yahoo Finance options request failed (${resp.status})` };
+            }
+            const data = await resp.json() as any;
+            const exps: number[] = data?.optionChain?.result?.[0]?.expirationDates || [];
+            if (exps.length === 0) {
+              return { success: false, result: "", steps, message: `No options data for ${symbol}` };
+            }
+            const expDates = exps.map((e: number) => new Date(e * 1000).toISOString().split("T")[0]);
+            steps.push(`Available expirations for ${symbol}:`);
+            for (const d of expDates.slice(0, 10)) steps.push(`  ${d}`);
+            if (expDates.length > 10) steps.push(`  ... and ${expDates.length - 10} more`);
+
+            return {
+              success: true,
+              result: `${expDates.length} expirations available`,
+              options: { expirations: expDates },
+              steps,
+              message: `Found ${expDates.length} expiration dates. Specify 'expiration' (YYYY-MM-DD) to get the chain.`,
+            };
+          }
+
+          // Fetch specific expiration
+          const expDate = new Date(params.expiration);
+          const expEpoch = Math.floor(expDate.getTime() / 1000);
+          const url = `https://query1.finance.yahoo.com/v7/finance/options/${symbol}?date=${expEpoch}`;
+          steps.push(`Fetching options chain for ${symbol} expiring ${params.expiration}...`);
+          const resp = await fetch(url, {
+            headers: { "User-Agent": "Mozilla/5.0" },
+          });
+          if (!resp.ok) {
+            return { success: false, result: "", steps, message: `Options chain request failed (${resp.status})` };
+          }
+          const data = await resp.json() as any;
+          const optResult = data?.optionChain?.result?.[0];
+          if (!optResult) {
+            return { success: false, result: "", steps, message: `No options data for ${symbol} at ${params.expiration}` };
+          }
+          const quote = optResult.quote;
+          const calls = optResult.options?.[0]?.calls?.slice(0, 10) || [];
+          const puts = optResult.options?.[0]?.puts?.slice(0, 10) || [];
+
+          steps.push(`Options chain for ${symbol} (expiry: ${params.expiration}):`);
+          steps.push(`  Underlying price: $${quote?.regularMarketPrice ?? "N/A"}`);
+          steps.push(``);
+          steps.push(`  CALLS (first 10):`);
+          for (const c of calls) {
+            steps.push(`    Strike $${c.strike}: Bid $${c.bid ?? 0}, Ask $${c.ask ?? 0}, Vol ${c.volume ?? 0}, OI ${c.openInterest ?? 0}, IV ${(c.impliedVolatility * 100).toFixed(1)}%`);
+          }
+          steps.push(`  PUTS (first 10):`);
+          for (const p of puts) {
+            steps.push(`    Strike $${p.strike}: Bid $${p.bid ?? 0}, Ask $${p.ask ?? 0}, Vol ${p.volume ?? 0}, OI ${p.openInterest ?? 0}, IV ${(p.impliedVolatility * 100).toFixed(1)}%`);
+          }
+
+          return {
+            success: true,
+            result: `${calls.length} calls, ${puts.length} puts`,
+            options: {
+              underlying_price: quote?.regularMarketPrice,
+              expiration: params.expiration,
+              calls: calls.map((c: any) => ({ strike: c.strike, bid: c.bid, ask: c.ask, last: c.lastPrice, volume: c.volume, open_interest: c.openInterest, iv: c.impliedVolatility, delta: c.delta })),
+              puts: puts.map((p: any) => ({ strike: p.strike, bid: p.bid, ask: p.ask, last: p.lastPrice, volume: p.volume, open_interest: p.openInterest, iv: p.impliedVolatility, delta: p.delta })),
+            },
+            steps,
+            message: `Options chain: ${calls.length} calls, ${puts.length} puts for ${params.expiration}`,
+          };
+        }
+
+        // ================================================================
+        // DIVIDENDS — Dividend history
+        // ================================================================
+        case "dividends": {
+          const url = `${chartUrl}?range=5y&interval=1d&events=div`;
+          steps.push(`Fetching dividend history for ${symbol} (5 years)...`);
+          const resp = await fetch(url, {
+            headers: { "User-Agent": "Mozilla/5.0" },
+          });
+          if (!resp.ok) {
+            return { success: false, result: "", steps, message: `Dividend request failed (${resp.status})` };
+          }
+          const data = await resp.json() as any;
+          const result = data?.chart?.result?.[0];
+          if (!result?.events?.dividends) {
+            steps.push(`No dividends found for ${symbol}`);
+            return { success: true, result: "No dividends", dividends: [], steps, message: `${symbol} has no dividend history` };
+          }
+          const divs = Object.values(result.events.dividends) as any[];
+          const dividends = divs.map((d) => ({
+            date: new Date(d.date * 1000).toISOString().split("T")[0]!,
+            dividend: d.amount,
+          })).sort((a, b) => b.date.localeCompare(a.date));
+
+          steps.push(`Dividend history for ${symbol}:`);
+          for (const d of dividends.slice(0, 10)) {
+            steps.push(`  ${d.date}: $${d.dividend}`);
+          }
+          if (dividends.length > 0) {
+            const annualDiv = dividends.slice(0, 4).reduce((s, d) => s + d.dividend, 0);
+            steps.push(`  Estimated annual dividend: $${annualDiv.toFixed(2)}`);
+          }
+
+          return {
+            success: true,
+            result: `${dividends.length} dividends`,
+            dividends,
+            steps,
+            message: `${dividends.length} dividend payments found for ${symbol}`,
+          };
+        }
+
+        default:
+          return { success: false, result: "", steps, message: "Unknown operation" };
+      }
+    } catch (e: any) {
+      return { success: false, result: "", steps, message: e.message ?? String(e) };
+    }
+  },
+};
