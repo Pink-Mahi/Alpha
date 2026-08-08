@@ -31,6 +31,7 @@ import { astronomySolve } from "./astronomyTools.js";
 import { cryptoHash, cryptoEncode, cryptoCipher } from "./cryptoTools.js";
 import { geoDistance, geoTimezone } from "./geoTools.js";
 import { textAnalyze, textSummarize } from "./textTools.js";
+import { sysProcess, sysNetwork, sysCron } from "./sysadminTools.js";
 import type { ModelRouterClient } from "./modelRouterClient.js";
 
 import type { ToolDef, ToolContext } from "./toolBus.js";
@@ -495,4 +496,8 @@ export function registerBuiltinTools(bus: import("./toolBus.js").ToolBus, router
   // Text & NLP tools
   bus.register(textAnalyze);
   bus.register(textSummarize);
+  // System administration tools
+  bus.register(sysProcess);
+  bus.register(sysNetwork);
+  bus.register(sysCron);
 }

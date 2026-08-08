@@ -145,6 +145,7 @@ ADVANCED CAPABILITIES:
 - CRYPTO: Use crypto.hash for SHA-256/512/384, SHA-1, and MD5 hashing (returns hex and base64). Use crypto.encode for Base64, hex, URL, ROT13, binary, and ASCII encoding/decoding. Use crypto.cipher for AES-256-CBC encryption/decryption with PBKDF2 key derivation, and random key generation.
 - GEOGRAPHY: Use geo.distance for Haversine distance, initial bearing (with compass direction), midpoint, destination point calculation, and DMS coordinate conversion. Use geo.timezone for timezone lookup by city, timezone conversion, and current UTC time.
 - TEXT NLP: Use text.analyze for comprehensive text analysis: word/sentence/paragraph counts, reading/speaking time, Flesch-Kincaid readability scores, sentiment analysis (positive/negative/neutral with word lists), keyword extraction (frequency-based with stop word filtering), and language detection (English/Spanish/French/German/Italian). Use text.summarize for extractive summarization with configurable length (sentence count or ratio).
+- SYSADMIN: Use sys.process for listing processes, finding by name, system resources (CPU, memory, disk, uptime, load average), and top CPU/memory consumers. Use sys.network for ping, DNS lookup, reverse DNS, port checking, network interfaces, and public IP. Use sys.cron for parsing cron expressions, calculating next N run times, explaining schedules in human-readable form, and converting intervals to cron format.
 
 SELF-LEARNING:
 - You have a memory system. Use memory.recall at the start of every task to recall relevant lessons from past work.
