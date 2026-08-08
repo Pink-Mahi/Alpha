@@ -1433,3 +1433,376 @@ export const stockData: ToolDef = {
     }
   },
 };
+
+// =============================================================================
+// STOCK PREDICT — Price/volume prediction using indicators + trend analysis
+// =============================================================================
+
+export const stockPredict: ToolDef = {
+  name: "stock.predict",
+  description: "Predict stock price direction and volume using technical indicator signals, trend analysis, support/resistance levels, and momentum scoring. Generates a comprehensive trading signal with confidence level, predicted price targets (bull/bear cases), recommended action for the wheel strategy (sell puts / hold / sell calls), and risk assessment. Combines multiple indicators into a weighted consensus prediction.",
+  inputSchema: z.object({
+    operation: z.enum(["predict", "signal", "price_targets", "risk_assessment", "volume_forecast", "list"]).describe("Prediction operation"),
+    closes: z.array(z.number()).optional().describe("Array of close prices"),
+    highs: z.array(z.number()).optional().describe("Array of high prices"),
+    lows: z.array(z.number()).optional().describe("Array of low prices"),
+    volumes: z.array(z.number()).optional().describe("Array of volumes"),
+    symbol: z.string().optional().describe("Stock symbol (for context)"),
+    current_price: z.number().optional().describe("Current stock price (if not in closes)"),
+    risk_tolerance: z.enum(["conservative", "moderate", "aggressive"]).default("moderate").describe("Risk tolerance for recommendations"),
+    target_days: z.number().default(5).describe("Prediction horizon in trading days"),
+  }),
+  outputSchema: z.object({
+    success: z.boolean(),
+    result: z.string(),
+    prediction: z.record(z.any()).optional(),
+    steps: z.array(z.string()),
+    message: z.string(),
+  }),
+  permissionsRequired: [],
+  sideEffect: "read",
+  requiresApproval: false,
+  async execute(params) {
+    const steps: string[] = [];
+
+    try {
+      if (params.operation === "list") {
+        const list = [
+          "predict: Full prediction (direction, confidence, targets, action, risk)",
+          "signal: Trading signal only (BUY/HOLD/SELL with strength)",
+          "price_targets: Bull/bear/base price targets with probabilities",
+          "risk_assessment: Volatility, max drawdown, VaR, risk score",
+          "volume_forecast: Predicted volume trend and liquidity assessment",
+        ].join("\n");
+        return { success: true, result: list, steps, message: "Available prediction operations" };
+      }
+
+      const closes = params.closes ?? [];
+      const highs = params.highs ?? closes;
+      const lows = params.lows ?? closes;
+      const volumes = params.volumes ?? [];
+      const n = closes.length;
+
+      if (n < 20) {
+        return { success: false, result: "", steps, message: "Need at least 20 data points for prediction" };
+      }
+
+      const last = closes[n - 1]!;
+      const symbol = params.symbol ?? "UNKNOWN";
+
+      // Calculate all indicators internally for the prediction
+      // RSI
+      const gains: number[] = [];
+      const losses: number[] = [];
+      for (let i = 1; i < n; i++) { const d = closes[i]! - closes[i - 1]!; gains.push(Math.max(0, d)); losses.push(Math.max(0, -d)); }
+      const rsiPeriod = 14;
+      let avgGain = 0, avgLoss = 0;
+      for (let i = 0; i < rsiPeriod; i++) { avgGain += gains[i] ?? 0; avgLoss += losses[i] ?? 0; }
+      avgGain /= rsiPeriod; avgLoss /= rsiPeriod;
+      for (let i = rsiPeriod; i < gains.length; i++) {
+        avgGain = (avgGain * (rsiPeriod - 1) + (gains[i] ?? 0)) / rsiPeriod;
+        avgLoss = (avgLoss * (rsiPeriod - 1) + (losses[i] ?? 0)) / rsiPeriod;
+      }
+      const rsi = avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
+
+      // MACD
+      const emaFast = ema(closes, 12);
+      const emaSlow = ema(closes, 26);
+      const macdLine = emaFast[n - 1]! - emaSlow[n - 1]!;
+      const macdArr: number[] = [];
+      for (let i = 0; i < n; i++) macdArr.push(emaFast[i]! - emaSlow[i]!);
+      const signalLine = ema(macdArr, 9)[n - 1]!;
+      const macdHist = macdLine - signalLine;
+
+      // Bollinger
+      const sma20 = sma(closes, 20)[n - 1]!;
+      let bVar = 0;
+      for (let i = n - 20; i < n; i++) bVar += (closes[i]! - sma20) ** 2;
+      bVar /= 20;
+      const bStd = Math.sqrt(bVar);
+      const bUpper = sma20 + 2 * bStd;
+      const bLower = sma20 - 2 * bStd;
+      const pctB = (last - bLower) / (bUpper - bLower);
+
+      // SMA-50
+      const hasSMA50 = n >= 50;
+      const sma50 = hasSMA50 ? sma(closes, 50)[n - 1]! : 0;
+
+      // SMA-200
+      const hasSMA200 = n >= 200;
+      const sma200 = hasSMA200 ? sma(closes, 200)[n - 1]! : 0;
+
+      // ATR
+      const tr: number[] = [];
+      for (let i = 1; i < n; i++) {
+        tr.push(Math.max(highs[i]! - lows[i]!, Math.abs(highs[i]! - closes[i - 1]!), Math.abs(lows[i]! - closes[i - 1]!)));
+      }
+      let atr = 0;
+      const atrPeriod = 14;
+      for (let i = 0; i < atrPeriod; i++) atr += tr[i] ?? 0;
+      atr /= atrPeriod;
+      for (let i = atrPeriod; i < tr.length; i++) {
+        atr = (atr * (atrPeriod - 1) + (tr[i] ?? 0)) / atrPeriod;
+      }
+      const atrPct = (atr / last) * 100;
+
+      // Trend (linear regression slope)
+      const xMean = (n - 1) / 2;
+      const yMean = closes.reduce((a: number, b: number) => a + b, 0) / n;
+      let sxy = 0, sxx = 0;
+      for (let i = 0; i < n; i++) {
+        sxy += (i - xMean) * (closes[i]! - yMean);
+        sxx += (i - xMean) ** 2;
+      }
+      const slope = sxy / sxx;
+      const slopePct = (slope / last) * 100;
+
+      // Support/Resistance
+      const recentHigh = Math.max(...highs.slice(-20));
+      const recentLow = Math.min(...lows.slice(-20));
+      const allHigh = Math.max(...highs);
+      const allLow = Math.min(...lows);
+
+      // Volume trend
+      let volTrend = "stable";
+      let avgVol = 0;
+      if (volumes.length > 0) {
+        const recentVol = volumes.slice(-10).reduce((a: number, b: number) => a + b, 0) / 10;
+        const olderVol = volumes.slice(-20, -10).reduce((a: number, b: number) => a + b, 0) / 10;
+        avgVol = recentVol;
+        volTrend = recentVol > olderVol * 1.2 ? "increasing" : recentVol < olderVol * 0.8 ? "decreasing" : "stable";
+      }
+
+      // ================================================================
+      // SCORING SYSTEM — Weighted indicator signals
+      // ================================================================
+      let bullScore = 0;
+      let bearScore = 0;
+      const signals: string[] = [];
+
+      // RSI (weight: 15)
+      if (rsi < 30) { bullScore += 15; signals.push(`RSI ${rsi.toFixed(0)} (oversold) → BULL +15`); }
+      else if (rsi > 70) { bearScore += 15; signals.push(`RSI ${rsi.toFixed(0)} (overbought) → BEAR +15`); }
+      else if (rsi > 50) { bullScore += 5; signals.push(`RSI ${rsi.toFixed(0)} (bullish zone) → BULL +5`); }
+      else { bearScore += 5; signals.push(`RSI ${rsi.toFixed(0)} (bearish zone) → BEAR +5`); }
+
+      // MACD (weight: 20)
+      if (macdLine > signalLine && macdHist > 0) { bullScore += 20; signals.push(`MACD bullish crossover (hist +${macdHist.toFixed(2)}) → BULL +20`); }
+      else if (macdLine < signalLine && macdHist < 0) { bearScore += 20; signals.push(`MACD bearish crossover (hist ${macdHist.toFixed(2)}) → BEAR +20`); }
+
+      // Bollinger %B (weight: 10)
+      if (pctB < 0) { bullScore += 10; signals.push(`Below lower Bollinger Band (%B=${pctB.toFixed(2)}) → BULL +10 (mean reversion)`); }
+      else if (pctB > 1) { bearScore += 10; signals.push(`Above upper Bollinger Band (%B=${pctB.toFixed(2)}) → BEAR +10 (mean reversion)`); }
+      else if (pctB < 0.2) { bullScore += 5; signals.push(`Near lower Bollinger (%B=${pctB.toFixed(2)}) → BULL +5`); }
+      else if (pctB > 0.8) { bearScore += 5; signals.push(`Near upper Bollinger (%B=${pctB.toFixed(2)}) → BEAR +5`); }
+
+      // Trend slope (weight: 20)
+      if (slopePct > 0.1) { bullScore += 20; signals.push(`Uptrend (slope +${slopePct.toFixed(2)}%/day) → BULL +20`); }
+      else if (slopePct < -0.1) { bearScore += 20; signals.push(`Downtrend (slope ${slopePct.toFixed(2)}%/day) → BEAR +20`); }
+
+      // SMA-50 (weight: 10)
+      if (hasSMA50) {
+        if (last > sma50) { bullScore += 10; signals.push(`Price above SMA-50 ($${sma50.toFixed(2)}) → BULL +10`); }
+        else { bearScore += 10; signals.push(`Price below SMA-50 ($${sma50.toFixed(2)}) → BEAR +10`); }
+      }
+
+      // SMA-200 (weight: 10)
+      if (hasSMA200) {
+        if (last > sma200) { bullScore += 10; signals.push(`Price above SMA-200 ($${sma200.toFixed(2)}) → BULL +10`); }
+        else { bearScore += 10; signals.push(`Price below SMA-200 ($${sma200.toFixed(2)}) → BEAR +10`); }
+        if (hasSMA50 && sma50 > sma200) { bullScore += 5; signals.push(`Golden Cross (SMA-50 > SMA-200) → BULL +5`); }
+        else if (hasSMA50 && sma50 < sma200) { bearScore += 5; signals.push(`Death Cross (SMA-50 < SMA-200) → BEAR +5`); }
+      }
+
+      // Volume (weight: 5)
+      if (volTrend === "increasing" && slopePct > 0) { bullScore += 5; signals.push(`Volume increasing in uptrend → BULL +5`); }
+      else if (volTrend === "increasing" && slopePct < 0) { bearScore += 5; signals.push(`Volume increasing in downtrend → BEAR +5`); }
+
+      // Support/Resistance (weight: 10)
+      if (last <= recentLow * 1.02) { bullScore += 10; signals.push(`Near support ($${recentLow.toFixed(2)}) → BULL +10`); }
+      else if (last >= recentHigh * 0.98) { bearScore += 10; signals.push(`Near resistance ($${recentHigh.toFixed(2)}) → BEAR +10`); }
+
+      const totalScore = bullScore + bearScore;
+      const bullPct = totalScore > 0 ? (bullScore / totalScore) * 100 : 50;
+      const confidence = Math.abs(bullPct - 50) * 2; // 0-100
+
+      let direction: "BULLISH" | "BEARISH" | "NEUTRAL";
+      let action: string;
+      if (bullPct > 65) {
+        direction = "BULLISH";
+        action = params.risk_tolerance === "conservative" ? "HOLD / Sell covered calls at higher strikes" : "SELL cash-secured puts to acquire shares or increase income";
+      } else if (bullPct < 35) {
+        direction = "BEARISH";
+        action = params.risk_tolerance === "conservative" ? "HOLD / Sell cash-secured puts at lower strikes for protection" : "SELL covered calls at lower strikes (expecting assignment)";
+      } else {
+        direction = "NEUTRAL";
+        action = "SELL both covered calls and cash-secured puts (wheel strategy) — market is range-bound, ideal for premium collection";
+      }
+
+      // Price targets
+      const targetDays = params.target_days;
+      const expectedMove = atr * Math.sqrt(targetDays);
+      const bullTarget = last + expectedMove * (bullPct / 100);
+      const bearTarget = last - expectedMove * ((100 - bullPct) / 100);
+      const baseTarget = last + slope * targetDays;
+
+      // Risk metrics
+      const dailyReturns: number[] = [];
+      for (let i = 1; i < n; i++) dailyReturns.push((closes[i]! - closes[i - 1]!) / closes[i - 1]!);
+      const avgReturn = dailyReturns.reduce((a: number, b: number) => a + b, 0) / dailyReturns.length;
+      const varianceR = dailyReturns.reduce((s: number, r: number) => s + (r - avgReturn) ** 2, 0) / dailyReturns.length;
+      const dailyVol = Math.sqrt(varianceR);
+      const annualVol = dailyVol * Math.sqrt(252);
+      const var95 = last * 1.65 * dailyVol * Math.sqrt(targetDays); // VaR at 95% confidence
+
+      // Max drawdown
+      let peak = closes[0]!;
+      let maxDD = 0;
+      for (const c of closes) {
+        if (c > peak) peak = c;
+        const dd = (peak - c) / peak;
+        if (dd > maxDD) maxDD = dd;
+      }
+
+      switch (params.operation) {
+        case "predict": {
+          steps.push(`=== STOCK PREDICTION FOR ${symbol} ===`);
+          steps.push(`Current price: $${last.toFixed(2)}`);
+          steps.push(`Prediction horizon: ${targetDays} trading days`);
+          steps.push(`Risk tolerance: ${params.risk_tolerance}`);
+          steps.push(``);
+          steps.push(`--- INDICATOR SIGNALS ---`);
+          for (const s of signals) steps.push(`  ${s}`);
+          steps.push(``);
+          steps.push(`--- SCORE ---`);
+          steps.push(`  Bull score: ${bullScore} (${bullPct.toFixed(1)}%)`);
+          steps.push(`  Bear score: ${bearScore} (${(100 - bullPct).toFixed(1)}%)`);
+          steps.push(`  Confidence: ${confidence.toFixed(1)}%`);
+          steps.push(`  Direction: ${direction}`);
+          steps.push(``);
+          steps.push(`--- PRICE TARGETS (${targetDays} days) ---`);
+          steps.push(`  Bull case: $${bullTarget.toFixed(2)} (+${(((bullTarget - last) / last) * 100).toFixed(1)}%)`);
+          steps.push(`  Base case: $${baseTarget.toFixed(2)} (${((baseTarget - last) / last) * 100 >= 0 ? "+" : ""}${(((baseTarget - last) / last) * 100).toFixed(1)}%)`);
+          steps.push(`  Bear case: $${bearTarget.toFixed(2)} (${(((bearTarget - last) / last) * 100).toFixed(1)}%)`);
+          steps.push(`  Expected move (1σ): ±$${expectedMove.toFixed(2)}`);
+          steps.push(``);
+          steps.push(`--- WHEEL STRATEGY ACTION ---`);
+          steps.push(`  ${action}`);
+          steps.push(``);
+          steps.push(`--- RISK METRICS ---`);
+          steps.push(`  ATR: $${atr.toFixed(2)} (${atrPct.toFixed(2)}% daily volatility)`);
+          steps.push(`  Annual volatility: ${(annualVol * 100).toFixed(1)}%`);
+          steps.push(`  VaR (95%, ${targetDays}d): -$${var95.toFixed(2)} (${(var95 / last * 100).toFixed(1)}%)`);
+          steps.push(`  Max drawdown (period): ${(maxDD * 100).toFixed(1)}%`);
+          steps.push(`  Volume trend: ${volTrend}${avgVol > 0 ? ` (avg: ${avgVol.toLocaleString()})` : ""}`);
+
+          return {
+            success: true,
+            result: `${direction} (${confidence.toFixed(0)}% confidence) — ${action}`,
+            prediction: {
+              direction, confidence, bull_score: bullScore, bear_score: bearScore,
+              bull_pct: bullPct, action,
+              targets: { bull: bullTarget, base: baseTarget, bear: bearTarget, expected_move: expectedMove },
+              risk: { atr, atr_pct: atrPct, annual_vol: annualVol, var_95: var95, max_drawdown: maxDD },
+              indicators: { rsi, macd: macdLine, macd_signal: signalLine, macd_hist: macdHist, bollinger_pct_b: pctB, sma50, sma200, slope_pct: slopePct },
+              signals,
+              volume_trend: volTrend,
+            },
+            steps,
+            message: `${symbol}: ${direction} (${confidence.toFixed(0)}% confidence) — ${action}`,
+          };
+        }
+
+        case "signal": {
+          const strength = confidence > 60 ? "STRONG" : confidence > 30 ? "MODERATE" : "WEAK";
+          const signalType = direction === "BULLISH" ? "BUY" : direction === "BEARISH" ? "SELL" : "HOLD";
+          steps.push(`Trading Signal for ${symbol}:`);
+          steps.push(`  Signal: ${strength} ${signalType}`);
+          steps.push(`  Confidence: ${confidence.toFixed(1)}%`);
+          steps.push(`  Bull: ${bullScore} | Bear: ${bearScore}`);
+          steps.push(`  Action: ${action}`);
+          return {
+            success: true,
+            result: `${strength} ${signalType} (${confidence.toFixed(0)}%)`,
+            prediction: { signal: signalType, strength, confidence, action, bull_score: bullScore, bear_score: bearScore },
+            steps,
+            message: `${symbol}: ${strength} ${signalType} — ${confidence.toFixed(0)}% confidence`,
+          };
+        }
+
+        case "price_targets": {
+          steps.push(`Price Targets for ${symbol} (${targetDays} days):`);
+          steps.push(`  Current: $${last.toFixed(2)}`);
+          steps.push(`  Bull case: $${bullTarget.toFixed(2)} (+${(((bullTarget - last) / last) * 100).toFixed(1)}%) — prob: ${bullPct.toFixed(0)}%`);
+          steps.push(`  Base case: $${baseTarget.toFixed(2)} (${((baseTarget - last) / last) * 100 >= 0 ? "+" : ""}${(((baseTarget - last) / last) * 100).toFixed(1)}%)`);
+          steps.push(`  Bear case: $${bearTarget.toFixed(2)} (${(((bearTarget - last) / last) * 100).toFixed(1)}%) — prob: ${(100 - bullPct).toFixed(0)}%`);
+          steps.push(`  Expected move (1σ): ±$${expectedMove.toFixed(2)}`);
+          steps.push(`  Support: $${recentLow.toFixed(2)} (recent), $${allLow.toFixed(2)} (period)`);
+          steps.push(`  Resistance: $${recentHigh.toFixed(2)} (recent), $${allHigh.toFixed(2)} (period)`);
+          return {
+            success: true,
+            result: `Bull=$${bullTarget.toFixed(2)}, Base=$${baseTarget.toFixed(2)}, Bear=$${bearTarget.toFixed(2)}`,
+            prediction: { bull: bullTarget, base: baseTarget, bear: bearTarget, expected_move: expectedMove, support: recentLow, resistance: recentHigh, bull_prob: bullPct, bear_prob: 100 - bullPct },
+            steps,
+            message: `Targets: Bull $${bullTarget.toFixed(2)} / Base $${baseTarget.toFixed(2)} / Bear $${bearTarget.toFixed(2)}`,
+          };
+        }
+
+        case "risk_assessment": {
+          const riskScore = Math.min(100, (atrPct * 10) + (annualVol * 50) + (maxDD * 100));
+          const riskLevel = riskScore > 60 ? "HIGH" : riskScore > 30 ? "MODERATE" : "LOW";
+          steps.push(`Risk Assessment for ${symbol}:`);
+          steps.push(`  Risk score: ${riskScore.toFixed(1)}/100 — ${riskLevel}`);
+          steps.push(`  ATR: $${atr.toFixed(2)} (${atrPct.toFixed(2)}% of price)`);
+          steps.push(`  Daily volatility: ${(dailyVol * 100).toFixed(2)}%`);
+          steps.push(`  Annual volatility: ${(annualVol * 100).toFixed(1)}%`);
+          steps.push(`  VaR (95%, ${targetDays}d): -$${var95.toFixed(2)} (${(var95 / last * 100).toFixed(1)}%)`);
+          steps.push(`  Max drawdown: ${(maxDD * 100).toFixed(1)}%`);
+          steps.push(`  Volume trend: ${volTrend}`);
+          steps.push(``);
+          steps.push(`  Position sizing suggestion (${params.risk_tolerance}):`);
+          const riskPerTrade = params.risk_tolerance === "conservative" ? 0.01 : params.risk_tolerance === "aggressive" ? 0.05 : 0.02;
+          steps.push(`    Risk per trade: ${(riskPerTrade * 100).toFixed(0)}% of account`);
+          steps.push(`    Stop-loss distance: $${atr.toFixed(2)} (1 ATR)`);
+          steps.push(`    Max position: (account × ${riskPerTrade}) / $${atr.toFixed(2)} per share`);
+          return {
+            success: true,
+            result: `Risk: ${riskLevel} (${riskScore.toFixed(0)}/100), VaR=${var95.toFixed(2)}`,
+            prediction: { risk_score: riskScore, risk_level: riskLevel, atr, atr_pct: atrPct, daily_vol: dailyVol, annual_vol: annualVol, var_95: var95, max_drawdown: maxDD, volume_trend: volTrend },
+            steps,
+            message: `Risk: ${riskLevel} (score ${riskScore.toFixed(0)}/100, VaR $${var95.toFixed(2)})`,
+          };
+        }
+
+        case "volume_forecast": {
+          let volPrediction = "stable";
+          let liquidity = "MODERATE";
+          if (volumes.length > 0) {
+            const recentAvg = volumes.slice(-5).reduce((a: number, b: number) => a + b, 0) / 5;
+            const longAvg = volumes.slice(-20).reduce((a: number, b: number) => a + b, 0) / 20;
+            volPrediction = recentAvg > longAvg * 1.3 ? "increasing (breakout volume)" : recentAvg < longAvg * 0.7 ? "decreasing (declining interest)" : "stable";
+            liquidity = recentAvg > 10e6 ? "HIGH" : recentAvg > 1e6 ? "MODERATE" : "LOW";
+          }
+          steps.push(`Volume Forecast for ${symbol}:`);
+          steps.push(`  Volume trend: ${volTrend}`);
+          steps.push(`  Predicted: ${volPrediction}`);
+          steps.push(`  Liquidity: ${liquidity}`);
+          if (avgVol > 0) steps.push(`  Average volume: ${avgVol.toLocaleString()}`);
+          steps.push(`  Price-volume divergence: ${volTrend === "increasing" && slopePct < 0 ? "YES (bearish — volume up, price down)" : volTrend === "decreasing" && slopePct > 0 ? "YES (suspicious — price up, volume down)" : "None"}`);
+          return {
+            success: true,
+            result: `Volume: ${volPrediction}, Liquidity: ${liquidity}`,
+            prediction: { volume_trend: volTrend, volume_prediction: volPrediction, liquidity, avg_volume: avgVol },
+            steps,
+            message: `Volume: ${volPrediction}, Liquidity: ${liquidity}`,
+          };
+        }
+
+        default:
+          return { success: false, result: "", steps, message: "Unknown operation" };
+      }
+    } catch (e: any) {
+      return { success: false, result: "", steps, message: e.message ?? String(e) };
+    }
+  },
+};
