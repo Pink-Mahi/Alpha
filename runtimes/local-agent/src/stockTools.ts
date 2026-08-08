@@ -3922,3 +3922,493 @@ export const stockEvents: ToolDef = {
     }
   },
 };
+
+// =============================================================================
+// STOCK PORTFOLIO — Position tracker, net Greeks, P&L, wheel cycle, risk
+// =============================================================================
+
+export const stockPortfolio: ToolDef = {
+  name: "stock.portfolio",
+  description: "Track options positions and calculate net portfolio Greeks (delta, gamma, theta, vega), realized + unrealized P&L, margin/collateral usage, assignment risk per position, wheel cycle tracking (which step am I on for each ticker?), and concentration risk (too much in one ticker/sector?). Essential for managing a portfolio of premium selling positions.",
+  inputSchema: z.object({
+    operation: z.enum(["summary", "net_greeks", "pnl", "margin", "wheel_cycle", "concentration_risk", "assignment_risk", "list"]).describe("Portfolio operation"),
+    positions: z.array(z.object({
+      symbol: z.string(),
+      type: z.enum(["stock", "put", "call", "put_spread", "call_spread", "iron_condor", "straddle", "strangle"]),
+      quantity: z.number().describe("Number of contracts (negative = short)"),
+      strike: z.number().optional().describe("Primary strike"),
+      strike2: z.number().optional().describe("Secondary strike (for spreads)"),
+      expiration: z.string().optional().describe("Expiration date YYYY-MM-DD"),
+      entry_price: z.number().optional().describe("Entry premium per contract"),
+      current_price: z.number().optional().describe("Current premium per contract"),
+      delta: z.number().optional().describe("Position delta per contract"),
+      gamma: z.number().optional().describe("Position gamma per contract"),
+      theta: z.number().optional().describe("Position theta per contract"),
+      vega: z.number().optional().describe("Position vega per contract"),
+      shares: z.number().optional().describe("Shares of stock (for stock positions)"),
+      cost_basis: z.number().optional().describe("Cost basis for stock positions"),
+    })).optional().describe("Array of open positions"),
+    spot_prices: z.record(z.number()).optional().describe("Current spot prices by symbol { AAPL: 195.5, ... }"),
+    account_size: z.number().default(100000).describe("Total account size for margin/concentration calculations"),
+  }),
+  outputSchema: z.object({
+    success: z.boolean(),
+    result: z.string(),
+    portfolio: z.record(z.any()).optional(),
+    steps: z.array(z.string()),
+    message: z.string(),
+  }),
+  permissionsRequired: [],
+  sideEffect: "read",
+  requiresApproval: false,
+  async execute(params) {
+    const steps: string[] = [];
+
+    try {
+      if (params.operation === "list") {
+        const list = [
+          "summary: Full portfolio overview (positions, net Greeks, P&L, margin, risk)",
+          "net_greeks: Aggregate delta, gamma, theta, vega across all positions",
+          "pnl: Realized + unrealized P&L breakdown by position",
+          "margin: Collateral/margin usage by position + total vs account size",
+          "wheel_cycle: Track wheel progress per ticker (Step 1: sell put → Step 2: assigned → Step 3: sell call → Step 4: called away)",
+          "concentration_risk: Check for over-concentration in single ticker/sector",
+          "assignment_risk: Flag positions at risk of early/automatic assignment",
+        ].join("\n");
+        return { success: true, result: list, steps, message: "Available portfolio operations" };
+      }
+
+      const positions = params.positions ?? [];
+      if (positions.length === 0) {
+        return { success: false, result: "", steps, message: "No positions provided" };
+      }
+
+      const accountSize = params.account_size;
+      const spotPrices = params.spot_prices ?? {};
+
+      function getSpot(sym: string): number {
+        return spotPrices[sym] ?? 0;
+      }
+
+      function calcDTE(exp?: string): number {
+        if (!exp) return 0;
+        return Math.max(0, Math.ceil((new Date(exp).getTime() - Date.now()) / (1000 * 60 * 60 * 24)));
+      }
+
+      switch (params.operation) {
+        case "net_greeks": {
+          let netDelta = 0, netGamma = 0, netTheta = 0, netVega = 0;
+          const greekBreakdown: Array<Record<string, any>> = [];
+
+          for (const pos of positions) {
+            const qty = pos.quantity;
+            const posDelta = (pos.delta ?? 0) * qty * 100;
+            const posGamma = (pos.gamma ?? 0) * qty * 100;
+            const posTheta = (pos.theta ?? 0) * qty * 100;
+            const posVega = (pos.vega ?? 0) * qty * 100;
+            netDelta += posDelta;
+            netGamma += posGamma;
+            netTheta += posTheta;
+            netVega += posVega;
+            greekBreakdown.push({ symbol: pos.symbol, type: pos.type, quantity: qty, delta: posDelta, gamma: posGamma, theta: posTheta, vega: posVega });
+          }
+
+          steps.push(`=== NET PORTFOLIO GREEKS ===`);
+          steps.push(`  Positions: ${positions.length}`);
+          steps.push(``);
+          steps.push(`  Net Delta: ${netDelta.toFixed(0)} ($${netDelta.toFixed(0)} per $1 move)`);
+          steps.push(`    ${netDelta > 0 ? "BULLISH (long delta)" : netDelta < 0 ? "BEARISH (short delta)" : "NEUTRAL"}`);
+          steps.push(`  Net Gamma: ${netGamma.toFixed(2)} (${netGamma > 0 ? "long gamma — delta increases with moves" : "short gamma — delta changes against you"})`);
+          steps.push(`  Net Theta: ${netTheta.toFixed(2)}/day (${netTheta > 0 ? "POSITIVE — earning time decay" : "NEGATIVE — paying time decay"})`);
+          steps.push(`  Net Vega: ${netVega.toFixed(2)} (${netVega > 0 ? "long vega — want IV to rise" : "short vega — want IV to fall (typical for premium sellers)"})`);
+          steps.push(``);
+          steps.push(`  Per-position breakdown:`);
+          steps.push(`  Symbol     | Type          | Qty  | Delta   | Theta   | Vega`);
+          for (const g of greekBreakdown) {
+            steps.push(`  ${g.symbol.padEnd(10)} | ${g.type.padEnd(13)} | ${String(g.quantity).padEnd(4)} | ${g.delta.toFixed(0).padEnd(8)} | ${g.theta.toFixed(2).padEnd(8)} | ${g.vega.toFixed(2)}`);
+          }
+          steps.push(``);
+          steps.push(`  INTERPRETATION:`);
+          if (netTheta > 0 && netVega < 0) {
+            steps.push(`    ✓ Ideal premium seller profile: positive theta (earning decay) + short vega (benefit from IV drop)`);
+          } else if (netTheta < 0) {
+            steps.push(`    ⚠ Negative theta — paying for time. Check if this is a hedged position or if you're net long options`);
+          }
+          if (Math.abs(netDelta) > accountSize * 0.01) {
+            steps.push(`    ⚠ High directional delta (${netDelta.toFixed(0)}) — consider hedging or reducing position size`);
+          }
+
+          return {
+            success: true,
+            result: `Delta=${netDelta.toFixed(0)}, Theta=${netTheta.toFixed(1)}/day, Vega=${netVega.toFixed(1)}`,
+            portfolio: { net_delta: netDelta, net_gamma: netGamma, net_theta: netTheta, net_vega: netVega, breakdown: greekBreakdown },
+            steps,
+            message: `Net Greeks: Delta ${netDelta.toFixed(0)}, Theta ${netTheta.toFixed(1)}/day, Vega ${netVega.toFixed(1)}`,
+          };
+        }
+
+        case "pnl": {
+          let totalUnrealized = 0;
+          let totalRealized = 0;
+          const pnlBreakdown: Array<Record<string, any>> = [];
+
+          for (const pos of positions) {
+            let unrealized = 0;
+            if (pos.type === "stock") {
+              const spot = getSpot(pos.symbol);
+              const costBasis = pos.cost_basis ?? 0;
+              const shares = pos.shares ?? pos.quantity * 100;
+              unrealized = (spot - costBasis) * shares;
+            } else {
+              const entry = pos.entry_price ?? 0;
+              const current = pos.current_price ?? 0;
+              const qty = pos.quantity;
+              unrealized = qty < 0 ? (entry - current) * Math.abs(qty) * 100 : (current - entry) * qty * 100;
+            }
+            totalUnrealized += unrealized;
+            pnlBreakdown.push({ symbol: pos.symbol, type: pos.type, quantity: pos.quantity, entry: pos.entry_price, current: pos.current_price, unrealized, realized: 0 });
+          }
+
+          const totalPnl = totalUnrealized + totalRealized;
+          const totalReturn = (totalPnl / accountSize) * 100;
+
+          steps.push(`=== PORTFOLIO P&L ===`);
+          steps.push(`  Account size: $${accountSize.toLocaleString()}`);
+          steps.push(``);
+          steps.push(`  Unrealized P&L: ${totalUnrealized >= 0 ? "+" : ""}$${totalUnrealized.toFixed(2)}`);
+          steps.push(`  Realized P&L:   ${totalRealized >= 0 ? "+" : ""}$${totalRealized.toFixed(2)}`);
+          steps.push(`  Total P&L:      ${totalPnl >= 0 ? "+" : ""}$${totalPnl.toFixed(2)} (${totalReturn.toFixed(2)}%)`);
+          steps.push(``);
+          steps.push(`  Per-position:`);
+          steps.push(`  Symbol     | Type          | Qty  | Entry   | Current  | Unrealized`);
+          for (const p of pnlBreakdown) {
+            steps.push(`  ${p.symbol.padEnd(10)} | ${p.type.padEnd(13)} | ${String(p.quantity).padEnd(4)} | $${(p.entry ?? 0).toFixed(2).padEnd(7)} | $${(p.current ?? 0).toFixed(2).padEnd(8)} | ${p.unrealized >= 0 ? "+" : ""}$${p.unrealized.toFixed(2)}`);
+          }
+
+          return {
+            success: true,
+            result: `Total P&L: ${totalPnl >= 0 ? "+" : ""}$${totalPnl.toFixed(2)} (${totalReturn.toFixed(2)}%)`,
+            portfolio: { unrealized: totalUnrealized, realized: totalRealized, total: totalPnl, return_pct: totalReturn, breakdown: pnlBreakdown },
+            steps,
+            message: `P&L: ${totalPnl >= 0 ? "+" : ""}$${totalPnl.toFixed(2)} (${totalReturn.toFixed(2)}% return)`,
+          };
+        }
+
+        case "margin": {
+          let totalMargin = 0;
+          const marginBreakdown: Array<Record<string, any>> = [];
+
+          for (const pos of positions) {
+            let margin = 0;
+            let marginType = "";
+
+            if (pos.type === "stock") {
+              margin = (pos.cost_basis ?? 0) * (pos.shares ?? pos.quantity * 100);
+              marginType = "Stock cost";
+            } else if (pos.type === "put" && pos.quantity < 0) {
+              margin = (pos.strike ?? 0) * Math.abs(pos.quantity) * 100;
+              marginType = "Cash-secured put collateral";
+            } else if (pos.type === "call" && pos.quantity < 0) {
+              margin = (pos.strike ?? 0) * Math.abs(pos.quantity) * 100 * 0.2;
+              marginType = "Naked call margin (Reg-T ~20%)";
+            } else if (pos.type === "put_spread" || pos.type === "call_spread" || pos.type === "iron_condor") {
+              const width = Math.abs((pos.strike ?? 0) - (pos.strike2 ?? 0));
+              margin = width * Math.abs(pos.quantity) * 100;
+              marginType = "Spread max loss";
+            } else if (pos.type === "straddle" || pos.type === "strangle") {
+              if (pos.quantity < 0) {
+                margin = (pos.strike ?? 0) * Math.abs(pos.quantity) * 100 * 0.15;
+                marginType = "Naked straddle/strangle margin (~15%)";
+              }
+            }
+
+            totalMargin += margin;
+            marginBreakdown.push({ symbol: pos.symbol, type: pos.type, quantity: pos.quantity, margin, margin_type: marginType });
+          }
+
+          const marginUsage = (totalMargin / accountSize) * 100;
+          const availableMargin = accountSize - totalMargin;
+
+          steps.push(`=== MARGIN / COLLATERAL USAGE ===`);
+          steps.push(`  Account size: $${accountSize.toLocaleString()}`);
+          steps.push(`  Total margin used: $${totalMargin.toLocaleString()}`);
+          steps.push(`  Available margin: $${availableMargin.toLocaleString()}`);
+          steps.push(`  Usage: ${marginUsage.toFixed(1)}%`);
+          steps.push(``);
+          steps.push(`  Per-position:`);
+          steps.push(`  Symbol     | Type          | Qty  | Margin     | Type`);
+          for (const m of marginBreakdown) {
+            steps.push(`  ${m.symbol.padEnd(10)} | ${m.type.padEnd(13)} | ${String(m.quantity).padEnd(4)} | $${m.margin.toFixed(0).padEnd(10)} | ${m.margin_type}`);
+          }
+          steps.push(``);
+          steps.push(`  RISK ASSESSMENT:`);
+          if (marginUsage > 80) {
+            steps.push(`    ⚠ CRITICAL: ${marginUsage.toFixed(0)}% margin used — very little room for new positions`);
+          } else if (marginUsage > 60) {
+            steps.push(`    ⚠ HIGH: ${marginUsage.toFixed(0)}% margin used — be cautious with new positions`);
+          } else if (marginUsage > 40) {
+            steps.push(`    ~ MODERATE: ${marginUsage.toFixed(0)}% margin used — reasonable utilization`);
+          } else {
+            steps.push(`    ✓ LOW: ${marginUsage.toFixed(0)}% margin used — plenty of capacity for new positions`);
+          }
+
+          return {
+            success: true,
+            result: `${marginUsage.toFixed(1)}% margin used ($${totalMargin.toLocaleString()})`,
+            portfolio: { total_margin: totalMargin, available: availableMargin, usage_pct: marginUsage, breakdown: marginBreakdown },
+            steps,
+            message: `Margin: ${marginUsage.toFixed(0)}% used ($${totalMargin.toLocaleString()}/${accountSize.toLocaleString()})`,
+          };
+        }
+
+        case "wheel_cycle": {
+          const bySymbol: Record<string, any[]> = {};
+          for (const pos of positions) {
+            if (!bySymbol[pos.symbol]) bySymbol[pos.symbol] = [];
+            bySymbol[pos.symbol]!.push(pos);
+          }
+
+          const cycles: Array<Record<string, any>> = [];
+          steps.push(`=== WHEEL CYCLE TRACKING ===`);
+          steps.push(``);
+
+          for (const [sym, symPositions] of Object.entries(bySymbol)) {
+            const hasStock = symPositions.some((p) => p.type === "stock" && (p.shares ?? p.quantity * 100) > 0);
+            const shortPuts = symPositions.filter((p) => p.type === "put" && p.quantity < 0);
+            const shortCalls = symPositions.filter((p) => p.type === "call" && p.quantity < 0);
+
+            let step: number;
+            let stepDesc: string;
+            let nextAction: string;
+
+            if (hasStock && shortCalls.length > 0) {
+              step = 3;
+              stepDesc = "Step 3: Holding stock + selling covered calls";
+              nextAction = "Wait for call assignment (stock called away at strike) → return to Step 1, OR roll call if nearing expiry";
+            } else if (hasStock) {
+              step = 2;
+              stepDesc = "Step 2: Assigned — holding stock (sell covered calls next)";
+              nextAction = `Sell covered calls at or above cost basis. Use stock.scanner to find best call strike.`;
+            } else if (shortPuts.length > 0) {
+              step = 1;
+              stepDesc = "Step 1: Selling cash-secured puts";
+              nextAction = "Wait for put to expire worthless (keep premium → repeat) OR get assigned (→ Step 2)";
+            } else {
+              step = 0;
+              stepDesc = "Not in wheel cycle";
+              nextAction = "Start wheel: sell cash-secured put below current price";
+            }
+
+            const spot = getSpot(sym);
+            const putStrikes = shortPuts.map((p) => p.strike).filter(Boolean);
+            const callStrikes = shortCalls.map((p) => p.strike).filter(Boolean);
+
+            cycles.push({ symbol: sym, step, step_desc: stepDesc, next_action: nextAction, spot, short_puts: putStrikes, short_calls: callStrikes, has_stock: hasStock });
+
+            steps.push(`  ${sym} (spot $${spot.toFixed(2)}):`);
+            steps.push(`    ${stepDesc}`);
+            if (putStrikes.length > 0) steps.push(`    Short puts: $${putStrikes.join(", $")}`);
+            if (callStrikes.length > 0) steps.push(`    Short calls: $${callStrikes.join(", $")}`);
+            steps.push(`    → Next: ${nextAction}`);
+            steps.push(``);
+          }
+
+          return {
+            success: true,
+            result: `${cycles.length} wheel cycles tracked`,
+            portfolio: { cycles },
+            steps,
+            message: `Wheel tracking: ${cycles.length} tickers, ${cycles.filter((c) => c.step > 0).length} active cycles`,
+          };
+        }
+
+        case "concentration_risk": {
+          const bySymbol: Record<string, number> = {};
+          for (const pos of positions) {
+            const margin = pos.type === "stock"
+              ? (pos.cost_basis ?? 0) * (pos.shares ?? pos.quantity * 100)
+              : (pos.strike ?? 0) * Math.abs(pos.quantity) * 100;
+            bySymbol[pos.symbol] = (bySymbol[pos.symbol] ?? 0) + margin;
+          }
+
+          const concentrations = Object.entries(bySymbol)
+            .map(([sym, margin]) => ({ symbol: sym, margin, pct: (margin / accountSize) * 100 }))
+            .sort((a, b) => b.margin - a.margin);
+
+          steps.push(`=== CONCENTRATION RISK ===`);
+          steps.push(`  Account size: $${accountSize.toLocaleString()}`);
+          steps.push(``);
+          steps.push(`  Symbol     | Margin      | % of Account | Risk`);
+          let hasHighRisk = false;
+          for (const c of concentrations) {
+            const risk = c.pct > 30 ? "HIGH" : c.pct > 20 ? "ELEVATED" : "OK";
+            if (c.pct > 20) hasHighRisk = true;
+            steps.push(`  ${c.symbol.padEnd(10)} | $${c.margin.toFixed(0).padEnd(10)} | ${c.pct.toFixed(1).padEnd(12)}% | ${risk}`);
+          }
+          steps.push(``);
+          steps.push(`  GUIDELINES:`);
+          steps.push(`    - Max 20-25% in any single ticker (recommended for premium sellers)`);
+          steps.push(`    - Max 40% in any single sector`);
+          steps.push(`    - Diversify across 5-10 tickers for balanced portfolio`);
+          steps.push(``);
+          if (hasHighRisk) {
+            steps.push(`  ⚠ OVER-CONCENTRATED — Consider reducing positions in high-risk tickers`);
+          } else {
+            steps.push(`  ✓ Concentration within acceptable limits`);
+          }
+
+          return {
+            success: true,
+            result: `${concentrations.length} tickers, max concentration ${concentrations[0]?.pct.toFixed(1) ?? 0}%`,
+            portfolio: { concentrations, max_concentration: concentrations[0]?.pct ?? 0, has_high_risk: hasHighRisk },
+            steps,
+            message: `Concentration: ${concentrations.length} tickers, max ${concentrations[0]?.pct.toFixed(1) ?? 0}%${hasHighRisk ? " (OVER-CONCENTRATED)" : ""}`,
+          };
+        }
+
+        case "assignment_risk": {
+          const risks: Array<Record<string, any>> = [];
+          steps.push(`=== ASSIGNMENT RISK ANALYSIS ===`);
+          steps.push(``);
+
+          for (const pos of positions) {
+            const sym = pos.symbol;
+            const spot = getSpot(sym);
+            const dte = calcDTE(pos.expiration);
+            const reasons: string[] = [];
+
+            if (pos.type === "put" && pos.quantity < 0) {
+              const strike = pos.strike ?? 0;
+              const itm = spot < strike;
+              const pctItm = itm ? ((strike - spot) / spot) * 100 : 0;
+              if (itm && dte <= 1) {
+                reasons.push(`PUT IS ITM (${pctItm.toFixed(1)}% below strike) and expires in ${dte}d — HIGH assignment risk`);
+              } else if (itm && dte <= 7) {
+                reasons.push(`PUT IS ITM (${pctItm.toFixed(1)}% below strike), ${dte}d to expiry — moderate assignment risk`);
+              } else if (itm) {
+                reasons.push(`PUT IS ITM (${pctItm.toFixed(1)}% below strike), ${dte}d to expiry — will likely be assigned at expiry if still ITM`);
+              } else {
+                reasons.push(`Put is OTM (${spot.toFixed(2)} > $${strike}) — low assignment risk`);
+              }
+            } else if (pos.type === "call" && pos.quantity < 0) {
+              const strike = pos.strike ?? 0;
+              const itm = spot > strike;
+              const pctItm = itm ? ((spot - strike) / spot) * 100 : 0;
+              if (itm && dte <= 1) {
+                reasons.push(`CALL IS ITM (${pctItm.toFixed(1)}% above strike) and expires in ${dte}d — HIGH assignment risk`);
+              } else if (itm && dte <= 7) {
+                reasons.push(`CALL IS ITM (${pctItm.toFixed(1)}% above strike), ${dte}d to expiry — moderate assignment risk`);
+              } else if (itm) {
+                reasons.push(`CALL IS ITM (${pctItm.toFixed(1)}% above strike), ${dte}d to expiry — will likely be assigned at expiry if still ITM`);
+              } else {
+                reasons.push(`Call is OTM (${spot.toFixed(2)} < $${strike}) — low assignment risk`);
+              }
+            }
+
+            if (reasons.length > 0) {
+              risks.push({ symbol: sym, type: pos.type, strike: pos.strike, spot, dte, reasons });
+              steps.push(`  ${sym} (${pos.type} $${pos.strike ?? "N/A"}, ${dte}d):`);
+              for (const r of reasons) {
+                steps.push(`    ⚠ ${r}`);
+              }
+              steps.push(``);
+            }
+          }
+
+          if (risks.length === 0) {
+            steps.push(`  ✓ No assignment risks detected for current positions`);
+          }
+
+          return {
+            success: true,
+            result: `${risks.length} positions with assignment risk`,
+            portfolio: { risks },
+            steps,
+            message: `Assignment risk: ${risks.length} positions flagged`,
+          };
+        }
+
+        case "summary": {
+          let netDelta = 0, netTheta = 0, netVega = 0;
+          let totalMargin = 0;
+          let totalUnrealized = 0;
+
+          for (const pos of positions) {
+            const qty = pos.quantity;
+            netDelta += (pos.delta ?? 0) * qty * 100;
+            netTheta += (pos.theta ?? 0) * qty * 100;
+            netVega += (pos.vega ?? 0) * qty * 100;
+
+            if (pos.type === "stock") {
+              totalMargin += (pos.cost_basis ?? 0) * (pos.shares ?? pos.quantity * 100);
+            } else if (pos.type === "put" && qty < 0) {
+              totalMargin += (pos.strike ?? 0) * Math.abs(qty) * 100;
+            } else if (pos.type === "put_spread" || pos.type === "call_spread" || pos.type === "iron_condor") {
+              const width = Math.abs((pos.strike ?? 0) - (pos.strike2 ?? 0));
+              totalMargin += width * Math.abs(qty) * 100;
+            }
+
+            if (pos.type === "stock") {
+              const spot = getSpot(pos.symbol);
+              totalUnrealized += (spot - (pos.cost_basis ?? 0)) * (pos.shares ?? pos.quantity * 100);
+            } else {
+              const entry = pos.entry_price ?? 0;
+              const current = pos.current_price ?? 0;
+              totalUnrealized += qty < 0 ? (entry - current) * Math.abs(qty) * 100 : (current - entry) * qty * 100;
+            }
+          }
+
+          const marginUsage = (totalMargin / accountSize) * 100;
+          const totalReturn = (totalUnrealized / accountSize) * 100;
+
+          const bySymbol: Record<string, number> = {};
+          for (const pos of positions) {
+            const m = pos.type === "stock" ? (pos.cost_basis ?? 0) * (pos.shares ?? pos.quantity * 100) : (pos.strike ?? 0) * Math.abs(pos.quantity) * 100;
+            bySymbol[pos.symbol] = (bySymbol[pos.symbol] ?? 0) + m;
+          }
+          const maxConcentration = Math.max(...Object.values(bySymbol), 0);
+          const maxConcPct = (maxConcentration / accountSize) * 100;
+
+          steps.push(`=== PORTFOLIO SUMMARY ===`);
+          steps.push(`  Positions: ${positions.length} | Account: $${accountSize.toLocaleString()}`);
+          steps.push(``);
+          steps.push(`  P&L: ${totalUnrealized >= 0 ? "+" : ""}$${totalUnrealized.toFixed(2)} (${totalReturn.toFixed(2)}%)`);
+          steps.push(`  Margin: $${totalMargin.toLocaleString()} (${marginUsage.toFixed(1)}%)`);
+          steps.push(`  Max concentration: ${maxConcPct.toFixed(1)}%`);
+          steps.push(``);
+          steps.push(`  Net Greeks:`);
+          steps.push(`    Delta: ${netDelta.toFixed(0)} (${netDelta > 0 ? "bullish" : netDelta < 0 ? "bearish" : "neutral"})`);
+          steps.push(`    Theta: ${netTheta.toFixed(2)}/day (${netTheta > 0 ? "earning decay" : "paying decay"})`);
+          steps.push(`    Vega:  ${netVega.toFixed(2)} (${netVega < 0 ? "short vega (want IV to fall)" : "long vega"})`);
+          steps.push(``);
+          steps.push(`  Risk flags:`);
+          if (marginUsage > 60) steps.push(`    ⚠ High margin usage (${marginUsage.toFixed(0)}%)`);
+          if (maxConcPct > 25) steps.push(`    ⚠ Over-concentrated (max ${maxConcPct.toFixed(0)}% in one ticker)`);
+          if (netTheta < 0) steps.push(`    ⚠ Negative theta — paying time decay`);
+          if (Math.abs(netDelta) > accountSize * 0.01) steps.push(`    ⚠ High directional delta (${netDelta.toFixed(0)})`);
+          if (marginUsage <= 60 && maxConcPct <= 25 && netTheta > 0) {
+            steps.push(`    ✓ Portfolio within healthy risk parameters`);
+          }
+
+          return {
+            success: true,
+            result: `${positions.length} positions, P&L ${totalUnrealized >= 0 ? "+" : ""}$${totalUnrealized.toFixed(0)}, margin ${marginUsage.toFixed(0)}%`,
+            portfolio: {
+              positions: positions.length, unrealized_pnl: totalUnrealized, return_pct: totalReturn,
+              margin_used: totalMargin, margin_pct: marginUsage,
+              net_delta: netDelta, net_theta: netTheta, net_vega: netVega,
+              max_concentration_pct: maxConcPct,
+            },
+            steps,
+            message: `Portfolio: ${positions.length} pos, P&L ${totalUnrealized >= 0 ? "+" : ""}$${totalUnrealized.toFixed(0)}, margin ${marginUsage.toFixed(0)}%`,
+          };
+        }
+
+        default:
+          return { success: false, result: "", steps, message: "Unknown operation" };
+      }
+    } catch (e: any) {
+      return { success: false, result: "", steps, message: e.message ?? String(e) };
+    }
+  },
+};
