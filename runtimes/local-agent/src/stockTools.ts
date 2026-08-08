@@ -1806,3 +1806,453 @@ export const stockPredict: ToolDef = {
     }
   },
 };
+
+// =============================================================================
+// STOCK STRATEGIES — All option premium selling strategies
+// =============================================================================
+
+export const stockStrategies: ToolDef = {
+  name: "stock.strategies",
+  description: "Analyze ALL option premium selling strategies: bull put spread, bear call spread, iron condor, iron butterfly, short straddle, short strangle, calendar spread, diagonal spread, jade lizard, broken wing butterfly, ratio spread, and naked put. Each strategy returns max profit, max loss, breakevens, margin requirement, ROI, best market environment, and assignment risk. Also includes a strategy screener that recommends the best premium strategy based on volatility, trend, and confidence level.",
+  inputSchema: z.object({
+    strategy: z.enum([
+      "bull_put_spread", "bear_call_spread", "iron_condor", "iron_butterfly",
+      "short_straddle", "short_strangle", "calendar_spread", "diagonal_spread",
+      "jade_lizard", "broken_wing_butterfly", "ratio_spread", "naked_put",
+      "screener", "list",
+    ]).describe("Strategy to analyze (or 'screener' for recommendation, 'list' for all)"),
+    spot: z.number().optional().describe("Current stock price"),
+    strike1: z.number().optional().describe("Strike for short leg 1"),
+    premium1: z.number().optional().describe("Premium received for short leg 1"),
+    strike2: z.number().optional().describe("Strike for long leg 2"),
+    premium2: z.number().optional().describe("Premium paid for long leg 2"),
+    strike3: z.number().optional().describe("Strike for short leg 3"),
+    premium3: z.number().optional().describe("Premium received for short leg 3"),
+    strike4: z.number().optional().describe("Strike for long leg 4"),
+    premium4: z.number().optional().describe("Premium paid for long leg 4"),
+    days_to_expiry: z.number().default(30).describe("Days to expiry"),
+    shares: z.number().default(100).describe("Shares per contract (default 100)"),
+    iv: z.number().optional().describe("Implied volatility (for screener, decimal e.g. 0.35)"),
+    trend: z.enum(["bullish", "bearish", "neutral"]).optional().describe("Trend direction (for screener)"),
+    confidence: z.number().optional().describe("Prediction confidence 0-100 (for screener)"),
+    account_size: z.number().optional().describe("Account size for margin calculations"),
+  }),
+  outputSchema: z.object({
+    success: z.boolean(),
+    result: z.string(),
+    strategy: z.string().optional(),
+    analysis: z.record(z.any()).optional(),
+    recommendations: z.array(z.record(z.any())).optional(),
+    steps: z.array(z.string()),
+    message: z.string(),
+  }),
+  permissionsRequired: [],
+  sideEffect: "read",
+  requiresApproval: false,
+  async execute(params) {
+    const steps: string[] = [];
+    const shares = params.shares;
+    const dte = params.days_to_expiry;
+
+    try {
+      if (params.strategy === "list") {
+        const list = [
+          "bull_put_spread: Sell ITM/ATM put + buy lower put (bullish, defined risk)",
+          "bear_call_spread: Sell ITM/ATM call + buy higher call (bearish, defined risk)",
+          "iron_condor: Bull put spread + bear call spread (neutral, defined risk)",
+          "iron_butterfly: ATM short straddle + OTM protective wings (neutral, max premium)",
+          "short_straddle: Sell ATM call + ATM put (neutral, undefined risk)",
+          "short_strangle: Sell OTM call + OTM put (neutral, undefined risk, wider range)",
+          "calendar_spread: Sell near-term + buy far-term same strike (neutral, time decay)",
+          "diagonal_spread: Sell near-term + buy far-term different strikes (directional)",
+          "jade_lizard: Short put + short call spread (bullish-neutral, no upside risk)",
+          "broken_wing_butterfly: Asymmetric butterfly (directional bias, zero cost possible)",
+          "ratio_spread: Sell N options + buy M options at different strikes (directional)",
+          "naked_put: Sell cash-secured put (bullish, income, assignment risk)",
+          "screener: Recommends best strategy based on IV, trend, and confidence",
+        ].join("\n");
+        return { success: true, result: list, steps, message: "13 strategies available" };
+      }
+
+      const S = params.spot ?? 0;
+      if (S === 0 && params.strategy !== "screener") {
+        return { success: false, result: "", steps, message: "Provide spot (current stock price)" };
+      }
+
+      switch (params.strategy) {
+        case "bull_put_spread": {
+          if (params.strike1 === undefined || params.strike2 === undefined || params.premium1 === undefined || params.premium2 === undefined) {
+            return { success: false, result: "", steps, message: "Provide strike1 (short put), strike2 (long put), premium1 (received), premium2 (paid)" };
+          }
+          const shortStrike = params.strike1;
+          const longStrike = params.strike2;
+          const netCredit = (params.premium1 - params.premium2) * shares;
+          const maxLoss = (shortStrike - longStrike - (params.premium1 - params.premium2)) * shares;
+          const breakeven = shortStrike - (params.premium1 - params.premium2);
+          const margin = maxLoss;
+          const roi = maxLoss > 0 ? (netCredit / maxLoss) * 100 : 0;
+          const width = shortStrike - longStrike;
+          steps.push(`=== BULL PUT SPREAD (Put Credit Spread) ===`);
+          steps.push(`  Market outlook: BULLISH to NEUTRAL`);
+          steps.push(`  Short put: $${shortStrike} (premium $${params.premium1})`);
+          steps.push(`  Long put: $${longStrike} (premium $${params.premium2})`);
+          steps.push(`  Spread width: $${width}`);
+          steps.push(`  Net credit: $${netCredit.toFixed(2)}`);
+          steps.push(`  Max profit: $${netCredit.toFixed(2)} (if stock stays above $${shortStrike})`);
+          steps.push(`  Max loss: $${maxLoss.toFixed(2)} (if stock drops below $${longStrike})`);
+          steps.push(`  Breakeven: $${breakeven.toFixed(2)}`);
+          steps.push(`  Margin required: $${margin.toFixed(2)} (defined risk)`);
+          steps.push(`  ROI: ${roi.toFixed(1)}%`);
+          steps.push(`  Best when: Moderately bullish, want defined risk, IV is elevated`);
+          steps.push(`  Assignment risk: LOW (short put is OTM if stock > strike1)`);
+          return { success: true, result: `Credit=$${netCredit.toFixed(0)}, MaxLoss=$${maxLoss.toFixed(0)}, ROI=${roi.toFixed(1)}%`, strategy: "bull_put_spread", analysis: { net_credit: netCredit, max_profit: netCredit, max_loss: maxLoss, breakeven, margin, roi, width, assignment_risk: "LOW" }, steps, message: `Bull put spread: $${netCredit.toFixed(0)} credit, ${roi.toFixed(1)}% ROI, max loss $${maxLoss.toFixed(0)}` };
+        }
+
+        case "bear_call_spread": {
+          if (params.strike1 === undefined || params.strike2 === undefined || params.premium1 === undefined || params.premium2 === undefined) {
+            return { success: false, result: "", steps, message: "Provide strike1 (short call), strike2 (long call), premium1 (received), premium2 (paid)" };
+          }
+          const shortStrike = params.strike1;
+          const longStrike = params.strike2;
+          const netCredit = (params.premium1 - params.premium2) * shares;
+          const maxLoss = (longStrike - shortStrike - (params.premium1 - params.premium2)) * shares;
+          const breakeven = shortStrike + (params.premium1 - params.premium2);
+          const margin = maxLoss;
+          const roi = maxLoss > 0 ? (netCredit / maxLoss) * 100 : 0;
+          const width = longStrike - shortStrike;
+          steps.push(`=== BEAR CALL SPREAD (Call Credit Spread) ===`);
+          steps.push(`  Market outlook: BEARISH to NEUTRAL`);
+          steps.push(`  Short call: $${shortStrike} (premium $${params.premium1})`);
+          steps.push(`  Long call: $${longStrike} (premium $${params.premium2})`);
+          steps.push(`  Spread width: $${width}`);
+          steps.push(`  Net credit: $${netCredit.toFixed(2)}`);
+          steps.push(`  Max profit: $${netCredit.toFixed(2)} (if stock stays below $${shortStrike})`);
+          steps.push(`  Max loss: $${maxLoss.toFixed(2)} (if stock rises above $${longStrike})`);
+          steps.push(`  Breakeven: $${breakeven.toFixed(2)}`);
+          steps.push(`  Margin required: $${margin.toFixed(2)} (defined risk)`);
+          steps.push(`  ROI: ${roi.toFixed(1)}%`);
+          steps.push(`  Best when: Moderately bearish, want defined risk, IV is elevated`);
+          steps.push(`  Assignment risk: LOW (short call is OTM if stock < strike1)`);
+          return { success: true, result: `Credit=$${netCredit.toFixed(0)}, MaxLoss=$${maxLoss.toFixed(0)}, ROI=${roi.toFixed(1)}%`, strategy: "bear_call_spread", analysis: { net_credit: netCredit, max_profit: netCredit, max_loss: maxLoss, breakeven, margin, roi, width, assignment_risk: "LOW" }, steps, message: `Bear call spread: $${netCredit.toFixed(0)} credit, ${roi.toFixed(1)}% ROI, max loss $${maxLoss.toFixed(0)}` };
+        }
+
+        case "iron_condor": {
+          if (params.strike1 === undefined || params.strike2 === undefined || params.strike3 === undefined || params.strike4 === undefined) {
+            return { success: false, result: "", steps, message: "Provide strike1 (short put), strike2 (long put), strike3 (long call), strike4 (short call) + all premiums" };
+          }
+          const pShort = params.strike1; const pLong = params.strike2;
+          const cLong = params.strike3; const cShort = params.strike4;
+          const totalCredit = ((params.premium1 ?? 0) - (params.premium2 ?? 0) + (params.premium4 ?? 0) - (params.premium3 ?? 0)) * shares;
+          const putWidth = pShort - pLong;
+          const callWidth = cShort - cLong;
+          const maxWidth = Math.max(putWidth, callWidth);
+          const maxLoss = (maxWidth * shares) - totalCredit;
+          const putBreakeven = pShort - (totalCredit / shares);
+          const callBreakeven = cShort + (totalCredit / shares);
+          const margin = maxLoss;
+          const roi = maxLoss > 0 ? (totalCredit / maxLoss) * 100 : 0;
+          const profitZone = `${putBreakeven.toFixed(2)} - $${callBreakeven.toFixed(2)}`;
+          steps.push(`=== IRON CONDOR ===`);
+          steps.push(`  Market outlook: NEUTRAL (range-bound)`);
+          steps.push(`  Put side: Short $${pShort} / Long $${pLong} (width $${putWidth})`);
+          steps.push(`  Call side: Short $${cShort} / Long $${cLong} (width $${callWidth})`);
+          steps.push(`  Total credit: $${totalCredit.toFixed(2)}`);
+          steps.push(`  Max profit: $${totalCredit.toFixed(2)} (if stock between $${pShort} and $${cShort})`);
+          steps.push(`  Max loss: $${maxLoss.toFixed(2)} (if stock below $${pLong} or above $${cLong})`);
+          steps.push(`  Profit zone: $${profitZone}`);
+          steps.push(`  Margin required: $${margin.toFixed(2)} (defined risk)`);
+          steps.push(`  ROI: ${roi.toFixed(1)}%`);
+          steps.push(`  Best when: Neutral, high IV, expect stock to stay range-bound`);
+          steps.push(`  Assignment risk: LOW (both shorts OTM in profit zone)`);
+          steps.push(`  Profit probability: ~65-70% (typical)`);
+          return { success: true, result: `Credit=$${totalCredit.toFixed(0)}, MaxLoss=$${maxLoss.toFixed(0)}, ROI=${roi.toFixed(1)}%, Zone=$${profitZone}`, strategy: "iron_condor", analysis: { total_credit: totalCredit, max_profit: totalCredit, max_loss: maxLoss, put_breakeven: putBreakeven, call_breakeven: callBreakeven, profit_zone: profitZone, margin, roi, put_width: putWidth, call_width: callWidth, assignment_risk: "LOW", profit_probability: "65-70%" }, steps, message: `Iron condor: $${totalCredit.toFixed(0)} credit, profit zone $${profitZone}, ${roi.toFixed(1)}% ROI` };
+        }
+
+        case "iron_butterfly": {
+          if (params.strike1 === undefined || params.strike2 === undefined || params.strike3 === undefined || params.premium1 === undefined || params.premium2 === undefined || params.premium3 === undefined) {
+            return { success: false, result: "", steps, message: "Provide strike1 (ATM short put=short call), strike2 (long put), strike3 (long call) + premiums" };
+          }
+          const atm = params.strike1;
+          const pLong = params.strike2;
+          const cLong = params.strike3;
+          const totalCredit = ((params.premium1 ?? 0) + (params.premium1 ?? 0) - (params.premium2 ?? 0) - (params.premium3 ?? 0)) * shares;
+          const wingWidth = atm - pLong;
+          const maxLoss = (wingWidth * shares) - totalCredit;
+          const breakevenLow = atm - (totalCredit / shares);
+          const breakevenHigh = atm + (totalCredit / shares);
+          const margin = maxLoss;
+          const roi = maxLoss > 0 ? (totalCredit / maxLoss) * 100 : 0;
+          steps.push(`=== IRON BUTTERFLY ===`);
+          steps.push(`  Market outlook: NEUTRAL (pin to a price)`);
+          steps.push(`  Short straddle: $${atm} (sell ATM put + ATM call)`);
+          steps.push(`  Long put: $${pLong}, Long call: $${cLong}`);
+          steps.push(`  Wing width: $${wingWidth}`);
+          steps.push(`  Total credit: $${totalCredit.toFixed(2)}`);
+          steps.push(`  Max profit: $${totalCredit.toFixed(2)} (if stock = $${atm} at expiry)`);
+          steps.push(`  Max loss: $${maxLoss.toFixed(2)} (if stock below $${pLong} or above $${cLong})`);
+          steps.push(`  Breakevens: $${breakevenLow.toFixed(2)} / $${breakevenHigh.toFixed(2)}`);
+          steps.push(`  Margin required: $${margin.toFixed(2)} (defined risk)`);
+          steps.push(`  ROI: ${roi.toFixed(1)}%`);
+          steps.push(`  Best when: Very neutral, HIGH IV, expect stock to pin near ATM`);
+          steps.push(`  Higher premium than iron condor but narrower profit zone`);
+          steps.push(`  Profit probability: ~40-45% but higher credit`);
+          return { success: true, result: `Credit=$${totalCredit.toFixed(0)}, MaxLoss=$${maxLoss.toFixed(0)}, ROI=${roi.toFixed(1)}%, Pin=$${atm}`, strategy: "iron_butterfly", analysis: { total_credit: totalCredit, max_profit: totalCredit, max_loss: maxLoss, breakeven_low: breakevenLow, breakeven_high: breakevenHigh, margin, roi, wing_width: wingWidth, atm_strike: atm, profit_probability: "40-45%" }, steps, message: `Iron butterfly: $${totalCredit.toFixed(0)} credit, pin $${atm}, ${roi.toFixed(1)}% ROI` };
+        }
+
+        case "short_straddle": {
+          if (params.strike1 === undefined || params.premium1 === undefined || params.premium2 === undefined) {
+            return { success: false, result: "", steps, message: "Provide strike1 (ATM strike), premium1 (call premium), premium2 (put premium)" };
+          }
+          const atm = params.strike1;
+          const totalCredit = (params.premium1 + params.premium2) * shares;
+          const breakevenLow = atm - (params.premium1 + params.premium2);
+          const breakevenHigh = atm + (params.premium1 + params.premium2);
+          const maxProfit = totalCredit;
+          steps.push(`=== SHORT STRADDLE ===`);
+          steps.push(`  Market outlook: NEUTRAL (expect low movement)`);
+          steps.push(`  Sell ATM call: $${atm} (premium $${params.premium1})`);
+          steps.push(`  Sell ATM put: $${atm} (premium $${params.premium2})`);
+          steps.push(`  Total credit: $${totalCredit.toFixed(2)}`);
+          steps.push(`  Max profit: $${maxProfit.toFixed(2)} (if stock = $${atm} at expiry)`);
+          steps.push(`  Max loss: UNLIMITED (stock can move any direction)`);
+          steps.push(`  Breakevens: $${breakevenLow.toFixed(2)} / $${breakevenHigh.toFixed(2)}`);
+          steps.push(`  Margin: Significant (undefined risk — broker dependent)`);
+          steps.push(`  Best when: Very neutral, HIGH IV, expect volatility contraction`);
+          steps.push(`  ⚠ WARNING: Undefined risk — stock can move significantly`);
+          steps.push(`  Profit probability: ~40% but collects double premium`);
+          return { success: true, result: `Credit=$${totalCredit.toFixed(0)}, Breakevens=$${breakevenLow.toFixed(2)}/$${breakevenHigh.toFixed(2)}, UNLIMITED RISK`, strategy: "short_straddle", analysis: { total_credit: totalCredit, max_profit: maxProfit, max_loss: "UNLIMITED", breakeven_low: breakevenLow, breakeven_high: breakevenHigh, margin: "SIGNIFICANT", assignment_risk: "HIGH", profit_probability: "~40%" }, steps, message: `Short straddle: $${totalCredit.toFixed(0)} credit, UNLIMITED RISK, breakevens $${breakevenLow.toFixed(2)}/$${breakevenHigh.toFixed(2)}` };
+        }
+
+        case "short_strangle": {
+          if (params.strike1 === undefined || params.strike2 === undefined || params.premium1 === undefined || params.premium2 === undefined) {
+            return { success: false, result: "", steps, message: "Provide strike1 (OTM put), strike2 (OTM call), premium1 (put), premium2 (call)" };
+          }
+          const putStrike = params.strike1;
+          const callStrike = params.strike2;
+          const totalCredit = (params.premium1 + params.premium2) * shares;
+          const breakevenLow = putStrike - (params.premium1 + params.premium2);
+          const breakevenHigh = callStrike + (params.premium1 + params.premium2);
+          const maxProfit = totalCredit;
+          steps.push(`=== SHORT STRANGLE ===`);
+          steps.push(`  Market outlook: NEUTRAL (wider range than straddle)`);
+          steps.push(`  Sell OTM put: $${putStrike} (premium $${params.premium1})`);
+          steps.push(`  Sell OTM call: $${callStrike} (premium $${params.premium2})`);
+          steps.push(`  Total credit: $${totalCredit.toFixed(2)}`);
+          steps.push(`  Max profit: $${maxProfit.toFixed(2)} (if stock between $${putStrike} and $${callStrike})`);
+          steps.push(`  Max loss: UNLIMITED (stock can move any direction)`);
+          steps.push(`  Breakevens: $${breakevenLow.toFixed(2)} / $${breakevenHigh.toFixed(2)}`);
+          steps.push(`  Profit zone: $${putStrike} - $${callStrike} (wider than straddle)`);
+          steps.push(`  Margin: Significant (undefined risk)`);
+          steps.push(`  Best when: Neutral, high IV, want wider profit zone than straddle`);
+          steps.push(`  ⚠ WARNING: Undefined risk but wider profit zone than straddle`);
+          steps.push(`  Profit probability: ~50-55% (higher than straddle)`);
+          return { success: true, result: `Credit=$${totalCredit.toFixed(0)}, Zone=$${putStrike}-$${callStrike}, UNLIMITED RISK`, strategy: "short_strangle", analysis: { total_credit: totalCredit, max_profit: maxProfit, max_loss: "UNLIMITED", breakeven_low: breakevenLow, breakeven_high: breakevenHigh, profit_zone: `${putStrike}-${callStrike}`, margin: "SIGNIFICANT", assignment_risk: "MODERATE", profit_probability: "50-55%" }, steps, message: `Short strangle: $${totalCredit.toFixed(0)} credit, zone $${putStrike}-$${callStrike}, UNLIMITED RISK` };
+        }
+
+        case "calendar_spread": {
+          if (params.strike1 === undefined || params.premium1 === undefined || params.premium2 === undefined) {
+            return { success: false, result: "", steps, message: "Provide strike1 (strike for both legs), premium1 (near-term sold), premium2 (far-term bought)" };
+          }
+          const strike = params.strike1;
+          const netDebit = (params.premium2 - params.premium1) * shares;
+          const maxProfit = "Variable — maximized if stock near strike at near-term expiry";
+          const breakeven = "Two breakevens — calculated at near-term expiry (depends on far-term value)";
+          steps.push(`=== CALENDAR SPREAD (Time Spread) ===`);
+          steps.push(`  Market outlook: NEUTRAL (expect stock near strike at near-term expiry)`);
+          steps.push(`  Sell near-term: $${strike} (${dte}d, premium $${params.premium1})`);
+          steps.push(`  Buy far-term: $${strike} (longer expiry, premium $${params.premium2})`);
+          steps.push(`  Net debit: $${netDebit.toFixed(2)}`);
+          steps.push(`  Max profit: ${maxProfit}`);
+          steps.push(`  Max loss: $${netDebit.toFixed(2)} (limited to debit paid)`);
+          steps.push(`  Breakevens: ${breakeven}`);
+          steps.push(`  Best when: Neutral, low IV near-term vs high IV far-term, expect time decay`);
+          steps.push(`  Key advantage: Near-term option decays faster than far-term`);
+          steps.push(`  Profit probability: ~45-50%`);
+          return { success: true, result: `Debit=$${netDebit.toFixed(0)}, Strike=$${strike}, MaxLoss=$${netDebit.toFixed(0)}`, strategy: "calendar_spread", analysis: { net_debit: netDebit, max_profit: maxProfit, max_loss: netDebit, breakeven, strike, profit_probability: "45-50%" }, steps, message: `Calendar spread: $${netDebit.toFixed(0)} debit, neutral on $${strike}` };
+        }
+
+        case "diagonal_spread": {
+          if (params.strike1 === undefined || params.strike2 === undefined || params.premium1 === undefined || params.premium2 === undefined) {
+            return { success: false, result: "", steps, message: "Provide strike1 (near-term short), strike2 (far-term long), premium1 (received), premium2 (paid)" };
+          }
+          const shortStrike = params.strike1;
+          const longStrike = params.strike2;
+          const netDebit = (params.premium2 - params.premium1) * shares;
+          const isCallDiag = longStrike > shortStrike;
+          steps.push(`=== DIAGONAL SPREAD ===`);
+          steps.push(`  Market outlook: ${isCallDiag ? "BULLISH" : "BEARISH"} (directional + time decay)`);
+          steps.push(`  Sell near-term ${isCallDiag ? "call" : "put"}: $${shortStrike} (${dte}d, premium $${params.premium1})`);
+          steps.push(`  Buy far-term ${isCallDiag ? "call" : "put"}: $${longStrike} (longer expiry, premium $${params.premium2})`);
+          steps.push(`  Net debit: $${netDebit.toFixed(2)}`);
+          steps.push(`  Max profit: Variable — depends on stock price at near-term expiry`);
+          steps.push(`  Max loss: $${netDebit.toFixed(2)} (limited to debit)`);
+          steps.push(`  Best when: ${isCallDiag ? "Moderately bullish" : "Moderately bearish"}, want time decay + direction`);
+          steps.push(`  Key advantage: Directional bias + near-term time decay income`);
+          steps.push(`  Can roll the short leg for additional income`);
+          return { success: true, result: `Debit=$${netDebit.toFixed(0)}, ${isCallDiag ? "Bullish" : "Bearish"} diagonal`, strategy: "diagonal_spread", analysis: { net_debit: netDebit, max_loss: netDebit, short_strike: shortStrike, long_strike: longStrike, direction: isCallDiag ? "BULLISH" : "BEARISH" }, steps, message: `Diagonal spread: $${netDebit.toFixed(0)} debit, ${isCallDiag ? "bullish" : "bearish"}` };
+        }
+
+        case "jade_lizard": {
+          if (params.strike1 === undefined || params.strike2 === undefined || params.strike3 === undefined || params.premium1 === undefined || params.premium2 === undefined || params.premium3 === undefined) {
+            return { success: false, result: "", steps, message: "Provide strike1 (short put), strike2 (short call), strike3 (long call), premiums 1-3" };
+          }
+          const putStrike = params.strike1;
+          const callShort = params.strike2;
+          const callLong = params.strike3;
+          const totalCredit = (params.premium1 + params.premium2 - params.premium3) * shares;
+          const callWidth = callLong - callShort;
+          const upsideRisk = (callWidth * shares) - totalCredit;
+          const noUpsideRisk = totalCredit >= callWidth * shares;
+          const breakevenLow = putStrike - (totalCredit / shares);
+          steps.push(`=== JADE LIZARD ===`);
+          steps.push(`  Market outlook: BULLISH to NEUTRAL`);
+          steps.push(`  Short put: $${putStrike} (premium $${params.premium1})`);
+          steps.push(`  Short call spread: Sell $${callShort} / Buy $${callLong}`);
+          steps.push(`  Total credit: $${totalCredit.toFixed(2)}`);
+          steps.push(`  Max profit: $${totalCredit.toFixed(2)} (if stock between $${putStrike} and $${callShort})`);
+          steps.push(`  Upside risk: ${noUpsideRisk ? "NONE (credit > call spread width)" : `$${upsideRisk.toFixed(2)} (if stock > $${callLong})`}`);
+          steps.push(`  Downside risk: UNLIMITED (short put, stock can drop to 0)`);
+          steps.push(`  Breakeven (downside): $${breakevenLow.toFixed(2)}`);
+          steps.push(`  Best when: Bullish-neutral, want no upside risk, IV elevated`);
+          steps.push(`  ${noUpsideRisk ? "✓ No upside risk — credit covers call spread" : "⚠ Upside risk exists — credit < call spread width"}`);
+          return { success: true, result: `Credit=$${totalCredit.toFixed(0)}, ${noUpsideRisk ? "No upside risk" : `Upside risk $${upsideRisk.toFixed(0)}`}`, strategy: "jade_lizard", analysis: { total_credit: totalCredit, max_profit: totalCredit, upside_risk: noUpsideRisk ? 0 : upsideRisk, downside_risk: "UNLIMITED (short put)", breakeven_low: breakevenLow, no_upside_risk: noUpsideRisk }, steps, message: `Jade lizard: $${totalCredit.toFixed(0)} credit, ${noUpsideRisk ? "no upside risk" : "has upside risk"}` };
+        }
+
+        case "broken_wing_butterfly": {
+          if (params.strike1 === undefined || params.strike2 === undefined || params.strike3 === undefined || params.premium1 === undefined || params.premium2 === undefined || params.premium3 === undefined) {
+            return { success: false, result: "", steps, message: "Provide strike1 (wing 1), strike2 (body, 2x), strike3 (wing 2, asymmetric), premiums 1-3" };
+          }
+          const wing1 = params.strike1;
+          const body = params.strike2;
+          const wing2 = params.strike3;
+          const netCost = (params.premium1 + 2 * params.premium3 - 2 * params.premium2) * shares;
+          const isCredit = netCost < 0;
+          const maxProfit = (Math.abs(body - wing1) * shares) - Math.abs(netCost);
+          const maxLoss = Math.abs(netCost);
+          steps.push(`=== BROKEN WING BUTTERFLY ===`);
+          steps.push(`  Market outlook: DIRECTIONAL (biased toward body strike)`);
+          steps.push(`  Wing 1: $${wing1} (buy 1, premium $${params.premium1})`);
+          steps.push(`  Body: $${body} (sell 2, premium $${params.premium2} each)`);
+          steps.push(`  Wing 2: $${wing2} (buy 1, premium $${params.premium3})`);
+          steps.push(`  Net ${isCredit ? "credit" : "debit"}: $${Math.abs(netCost).toFixed(2)}`);
+          steps.push(`  Max profit: $${maxProfit.toFixed(2)} (if stock = $${body} at expiry)`);
+          steps.push(`  Max loss: $${maxLoss.toFixed(2)}`);
+          steps.push(`  Best when: Directional bias, want free trade (if credit) or low cost`);
+          steps.push(`  ${isCredit ? "✓ Credit spread — profit even if wrong direction (small)" : "Debit spread — need stock near body"}`);
+          return { success: true, result: `${isCredit ? "Credit" : "Debit"}=$${Math.abs(netCost).toFixed(0)}, MaxProfit=$${maxProfit.toFixed(0)}`, strategy: "broken_wing_butterfly", analysis: { net_cost: netCost, is_credit: isCredit, max_profit: maxProfit, max_loss: maxLoss, wing1, body, wing2 }, steps, message: `Broken wing butterfly: ${isCredit ? "credit" : "debit"} $${Math.abs(netCost).toFixed(0)}, max profit $${maxProfit.toFixed(0)}` };
+        }
+
+        case "ratio_spread": {
+          if (params.strike1 === undefined || params.strike2 === undefined || params.premium1 === undefined || params.premium2 === undefined) {
+            return { success: false, result: "", steps, message: "Provide strike1 (buy 1), strike2 (sell 2+), premiums, and ratio" };
+          }
+          const buyStrike = params.strike1;
+          const sellStrike = params.strike2;
+          const ratio = 2;
+          const netCost = (params.premium1 - ratio * params.premium2) * shares;
+          const isCredit = netCost < 0;
+          const maxProfit = (sellStrike - buyStrike) * shares - Math.abs(netCost);
+          const breakeven = sellStrike + (maxProfit / shares);
+          steps.push(`=== RATIO SPREAD (1:${ratio}) ===`);
+          steps.push(`  Market outlook: MODERATELY DIRECTIONAL`);
+          steps.push(`  Buy 1: $${buyStrike} (premium $${params.premium1})`);
+          steps.push(`  Sell ${ratio}: $${sellStrike} (premium $${params.premium2} each)`);
+          steps.push(`  Net ${isCredit ? "credit" : "cost"}: $${Math.abs(netCost).toFixed(2)}`);
+          steps.push(`  Max profit: $${maxProfit.toFixed(2)} (if stock = $${sellStrike} at expiry)`);
+          steps.push(`  Breakeven: $${breakeven.toFixed(2)}`);
+          steps.push(`  Max loss: UNLIMITED above breakeven (extra short option)`);
+          steps.push(`  Best when: Moderately directional, want low cost or credit, IV elevated`);
+          steps.push(`  ⚠ Has naked option risk beyond breakeven`);
+          return { success: true, result: `${isCredit ? "Credit" : "Cost"}=$${Math.abs(netCost).toFixed(0)}, MaxProfit=$${maxProfit.toFixed(0)}, UNLIMITED upside risk`, strategy: "ratio_spread", analysis: { net_cost: netCost, is_credit: isCredit, max_profit: maxProfit, breakeven, ratio, max_loss: "UNLIMITED (naked option)" }, steps, message: `Ratio spread 1:${ratio}: max profit $${maxProfit.toFixed(0)}, unlimited risk above $${breakeven.toFixed(2)}` };
+        }
+
+        case "naked_put": {
+          if (params.strike1 === undefined || params.premium1 === undefined) {
+            return { success: false, result: "", steps, message: "Provide strike1 (put strike) and premium1 (premium received)" };
+          }
+          const strike = params.strike1;
+          const premium = params.premium1;
+          const totalCredit = premium * shares;
+          const collateral = strike * shares;
+          const breakeven = strike - premium;
+          const roi = (premium / strike) * 100;
+          const maxLoss = (strike - premium) * shares;
+          steps.push(`=== NAKED PUT (Cash-Secured Put) ===`);
+          steps.push(`  Market outlook: BULLISH to NEUTRAL`);
+          steps.push(`  Sell put: $${strike} (premium $${premium})`);
+          steps.push(`  Credit: $${totalCredit.toFixed(2)}`);
+          steps.push(`  Collateral: $${collateral.toFixed(2)} (cash secured)`);
+          steps.push(`  Max profit: $${totalCredit.toFixed(2)} (if stock > $${strike})`);
+          steps.push(`  Max loss: $${maxLoss.toFixed(2)} (if stock → $0)`);
+          steps.push(`  Breakeven: $${breakeven.toFixed(2)}`);
+          steps.push(`  ROI: ${roi.toFixed(2)}% on collateral`);
+          steps.push(`  Best when: Bullish, want to acquire shares at discount, IV elevated`);
+          steps.push(`  Assignment risk: MODERATE (if stock drops below strike)`);
+          steps.push(`  Part of the WHEEL STRATEGY (step 1)`);
+          return { success: true, result: `Credit=$${totalCredit.toFixed(0)}, ROI=${roi.toFixed(1)}%, Breakeven=$${breakeven.toFixed(2)}`, strategy: "naked_put", analysis: { total_credit: totalCredit, collateral, max_profit: totalCredit, max_loss: maxLoss, breakeven, roi, assignment_risk: "MODERATE", wheel_step: 1 }, steps, message: `Naked put: $${totalCredit.toFixed(0)} credit, ${roi.toFixed(1)}% ROI, breakeven $${breakeven.toFixed(2)}` };
+        }
+
+        case "screener": {
+          if (params.iv === undefined || params.trend === undefined) {
+            return { success: false, result: "", steps, message: "Provide iv (implied volatility, decimal), trend (bullish/bearish/neutral), and optionally confidence (0-100)" };
+          }
+          const iv = params.iv;
+          const ivPct = iv * 100;
+          const trend = params.trend;
+          const confidence = params.confidence ?? 50;
+          const recommendations: Array<Record<string, any>> = [];
+          steps.push(`=== STRATEGY SCREENER ===`);
+          steps.push(`  IV: ${ivPct.toFixed(1)}% ${ivPct > 30 ? "(ELEVATED — good for selling)" : "(LOW — premium may be thin)"}`);
+          steps.push(`  Trend: ${trend.toUpperCase()}`);
+          steps.push(`  Confidence: ${confidence.toFixed(0)}%`);
+          steps.push(``);
+
+          const veryHighIV = ivPct > 50;
+
+          if (trend === "bullish") {
+            recommendations.push({ strategy: "naked_put (cash-secured put)", rank: 1, reason: "Bullish trend — sell puts to collect premium or acquire shares at lower cost basis", best_for: "Wheel strategy step 1, income generation", risk: "MODERATE (assignment if stock drops)", iv_requirement: "Any (better with IV > 25%)", confidence_threshold: 50 });
+            recommendations.push({ strategy: "bull_put_spread", rank: 2, reason: "Bullish with defined risk — good when IV is elevated but want protection", best_for: "Defined risk bullish income", risk: "LOW (defined max loss)", iv_requirement: "IV > 25% preferred", confidence_threshold: 60 });
+            recommendations.push({ strategy: "jade_lizard", rank: 3, reason: "Bullish-neutral with no upside risk if structured for credit", best_for: "Bullish but want no upside risk", risk: "DOWNSIDE (short put) but no upside risk", iv_requirement: "IV > 30%", confidence_threshold: 65 });
+            if (confidence > 70) {
+              recommendations.push({ strategy: "diagonal_spread (call)", rank: 4, reason: "High confidence bullish — directional + time decay income", best_for: "Strong bullish conviction with income", risk: "LOW (defined debit)", iv_requirement: "Any", confidence_threshold: 70 });
+            }
+          } else if (trend === "bearish") {
+            recommendations.push({ strategy: "bear_call_spread", rank: 1, reason: "Bearish with defined risk — sell call spread for credit", best_for: "Defined risk bearish income", risk: "LOW (defined max loss)", iv_requirement: "IV > 25% preferred", confidence_threshold: 55 });
+            recommendations.push({ strategy: "covered_call (aggressive strike)", rank: 2, reason: "If holding shares — sell calls at lower strikes to exit position at good price", best_for: "Existing stock holders wanting to exit", risk: "LOW (covered by shares)", iv_requirement: "Any", confidence_threshold: 50 });
+            if (veryHighIV) {
+              recommendations.push({ strategy: "short strangle (wide)", rank: 3, reason: "Very high IV + bearish — sell OTM calls and puts for large credit", best_for: "High IV mean reversion play", risk: "UNLIMITED — only for experienced traders", iv_requirement: "IV > 50%", confidence_threshold: 75 });
+            }
+          } else {
+            recommendations.push({ strategy: "iron_condor", rank: 1, reason: "Neutral range-bound — collect premium from both sides with defined risk", best_for: "Neutral, range-bound stocks, defined risk", risk: "LOW (defined max loss)", iv_requirement: "IV > 25% preferred", confidence_threshold: 50 });
+            if (veryHighIV) {
+              recommendations.push({ strategy: "iron_butterfly", rank: 2, reason: "Very high IV + neutral — maximum premium collection, pin to price", best_for: "High IV, expect stock to pin near current price", risk: "LOW (defined max loss)", iv_requirement: "IV > 40%", confidence_threshold: 60 });
+              recommendations.push({ strategy: "short straddle", rank: 3, reason: "Very high IV + very neutral — maximum double premium", best_for: "Highest premium, expect no movement", risk: "UNLIMITED — only for experienced traders", iv_requirement: "IV > 40%", confidence_threshold: 80 });
+              recommendations.push({ strategy: "short strangle", rank: 4, reason: "Very high IV + neutral — wider profit zone than straddle", best_for: "High IV, want wider profit zone", risk: "UNLIMITED — wider zone than straddle", iv_requirement: "IV > 40%", confidence_threshold: 70 });
+            }
+            recommendations.push({ strategy: "calendar_spread", rank: veryHighIV ? 5 : 2, reason: "Neutral — profit from time decay differential", best_for: "Neutral, expect low near-term movement", risk: "LOW (limited to debit)", iv_requirement: "Better when near-term IV < far-term IV", confidence_threshold: 55 });
+          }
+
+          recommendations.sort((a, b) => a.rank - b.rank);
+          steps.push(`--- RECOMMENDED STRATEGIES (ranked) ---`);
+          for (const rec of recommendations) {
+            steps.push(`  #${rec.rank}: ${rec.strategy}`);
+            steps.push(`    Reason: ${rec.reason}`);
+            steps.push(`    Risk: ${rec.risk}`);
+            steps.push(`    IV req: ${rec.iv_requirement}`);
+            steps.push(`    Confidence needed: ${rec.confidence_threshold}%`);
+            steps.push(``);
+          }
+          const top = recommendations[0]!;
+          steps.push(`=== TOP PICK: ${top.strategy} ===`);
+          steps.push(`  ${top.reason}`);
+          return { success: true, result: `Top: ${top.strategy}`, strategy: "screener", recommendations, steps, message: `Best strategy: ${top.strategy} (${top.reason})` };
+        }
+
+        default:
+          return { success: false, result: "", steps, message: "Unknown strategy. Use 'list' to see all." };
+      }
+    } catch (e: any) {
+      return { success: false, result: "", steps, message: e.message ?? String(e) };
+    }
+  },
+};
