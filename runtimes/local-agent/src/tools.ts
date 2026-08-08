@@ -23,6 +23,7 @@ import {
 } from "./tier3Tools.js";
 import { mathSolve, mathCalculate, physicsSolve, chemistrySolve, scienceConstant } from "./scienceTools.js";
 import { medicalSymptoms, medicalDrug, medicalAnatomy, medicalLab } from "./medicalTools.js";
+import { circuitAnalyze, magnetismSolve, semiconductorSolve, digitalLogic } from "./electronicsTools.js";
 import type { ModelRouterClient } from "./modelRouterClient.js";
 
 import type { ToolDef, ToolContext } from "./toolBus.js";
@@ -458,4 +459,9 @@ export function registerBuiltinTools(bus: import("./toolBus.js").ToolBus, router
   bus.register(medicalDrug);
   bus.register(medicalAnatomy);
   bus.register(medicalLab);
+  // Electronics & magnetism tools
+  bus.register(circuitAnalyze);
+  bus.register(magnetismSolve);
+  bus.register(semiconductorSolve);
+  bus.register(digitalLogic);
 }
