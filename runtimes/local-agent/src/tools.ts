@@ -29,6 +29,7 @@ import { statsDescribe, statsHypothesisTest, statsRegression, statsDistribution 
 import { mechanicalSolve, fluidMechanics, heatTransfer } from "./mechanicalTools.js";
 import { astronomySolve } from "./astronomyTools.js";
 import { cryptoHash, cryptoEncode, cryptoCipher } from "./cryptoTools.js";
+import { geoDistance, geoTimezone } from "./geoTools.js";
 import type { ModelRouterClient } from "./modelRouterClient.js";
 
 import type { ToolDef, ToolContext } from "./toolBus.js";
@@ -487,4 +488,7 @@ export function registerBuiltinTools(bus: import("./toolBus.js").ToolBus, router
   bus.register(cryptoHash);
   bus.register(cryptoEncode);
   bus.register(cryptoCipher);
+  // Geography tools
+  bus.register(geoDistance);
+  bus.register(geoTimezone);
 }
