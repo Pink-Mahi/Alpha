@@ -763,3 +763,385 @@ export const stockIndicators: ToolDef = {
     }
   },
 };
+
+// =============================================================================
+// Normal CDF for Black-Scholes (reused from statisticsTools pattern)
+// =============================================================================
+
+function normCDF(x: number): number {
+  // Abramowitz & Stegun approximation
+  const sign = x >= 0 ? 1 : -1;
+  const ax = Math.abs(x) / Math.SQRT2;
+  const t = 1 / (1 + 0.3275911 * ax);
+  const y = 1 - (((((0.254829592 * t - 0.284496736) * t + 1.421413741) * t - 1.453152027) * t + 1.061405429) * t) * Math.exp(-ax * ax);
+  return 0.5 * (1 + sign * y);
+}
+
+function normPDF(x: number): number {
+  return Math.exp(-0.5 * x * x) / Math.sqrt(2 * Math.PI);
+}
+
+// =============================================================================
+// STOCK OPTIONS — Black-Scholes pricing, Greeks, wheel strategy
+// =============================================================================
+
+export const stockOptions: ToolDef = {
+  name: "stock.options",
+  description: "Options pricing and analysis: Black-Scholes pricing for calls/puts, all Greeks (delta, gamma, theta, vega, rho), implied volatility estimation, covered call analysis (premium yield, assignment risk), cash-secured put analysis (premium, breakeven, ROI), and full wheel strategy evaluation (which leg to enter, optimal strike selection). Built for income strategies.",
+  inputSchema: z.object({
+    operation: z.enum([
+      "black_scholes", "greeks", "implied_volatility", "covered_call",
+      "cash_secured_put", "wheel_strategy", "list",
+    ]).describe("Options operation (or 'list')"),
+    option_type: z.enum(["call", "put"]).optional().describe("Call or Put"),
+    spot: z.number().optional().describe("Current stock price"),
+    strike: z.number().optional().describe("Strike price"),
+    time_to_expiry: z.number().optional().describe("Time to expiry in years (e.g. 0.083 = ~1 month)"),
+    days_to_expiry: z.number().optional().describe("Days to expiry (alternative to time_to_expiry)"),
+    volatility: z.number().optional().describe("Implied volatility (decimal, e.g. 0.35 = 35%)"),
+    risk_free_rate: z.number().default(0.05).describe("Risk-free rate (decimal, default 5%)"),
+    dividend_yield: z.number().default(0).describe("Dividend yield (decimal, default 0)"),
+    premium: z.number().optional().describe("Option premium (market price, for IV calculation)"),
+    shares: z.number().default(100).describe("Number of shares (default 100 = 1 contract)"),
+    account_size: z.number().optional().describe("Account size for position sizing"),
+  }),
+  outputSchema: z.object({
+    success: z.boolean(),
+    result: z.string(),
+    values: z.record(z.any()).optional(),
+    steps: z.array(z.string()),
+    message: z.string(),
+  }),
+  permissionsRequired: [],
+  sideEffect: "read",
+  requiresApproval: false,
+  async execute(params) {
+    const steps: string[] = [];
+
+    try {
+      if (params.operation === "list") {
+        const list = [
+          "black_scholes: Price a call/put using Black-Scholes-Merton",
+          "greeks: Calculate delta, gamma, theta, vega, rho",
+          "implied_volatility: Estimate IV from market premium",
+          "covered_call: Analyze covered call (premium yield, assignment risk, breakeven)",
+          "cash_secured_put: Analyze cash-secured put (premium, ROI, breakeven, capital required)",
+          "wheel_strategy: Full wheel evaluation — which leg, optimal strike, expected returns",
+        ].join("\n");
+        return { success: true, result: list, steps, message: "Available options operations" };
+      }
+
+      const r = params.risk_free_rate;
+      const q = params.dividend_yield;
+      const T = params.days_to_expiry !== undefined ? params.days_to_expiry / 365 : params.time_to_expiry ?? 0.083;
+
+      // ================================================================
+      // BLACK-SCHOLES PRICING
+      // ================================================================
+      if (params.operation === "black_scholes") {
+        if (params.option_type === undefined || params.spot === undefined || params.strike === undefined || params.volatility === undefined) {
+          return { success: false, result: "", steps, message: "Provide option_type, spot, strike, volatility (and days_to_expiry or time_to_expiry)" };
+        }
+        const S = params.spot;
+        const K = params.strike;
+        const sigma = params.volatility;
+
+        const d1 = (Math.log(S / K) + (r - q + 0.5 * sigma ** 2) * T) / (sigma * Math.sqrt(T));
+        const d2 = d1 - sigma * Math.sqrt(T);
+
+        let price: number;
+        if (params.option_type === "call") {
+          price = S * Math.exp(-q * T) * normCDF(d1) - K * Math.exp(-r * T) * normCDF(d2);
+        } else {
+          price = K * Math.exp(-r * T) * normCDF(-d2) - S * Math.exp(-q * T) * normCDF(-d1);
+        }
+
+        steps.push(`Black-Scholes-Merton Pricing:`);
+        steps.push(`  Spot: $${S}, Strike: $${K}, Type: ${params.option_type.toUpperCase()}`);
+        steps.push(`  Time to expiry: ${T.toFixed(4)} years (${(T * 365).toFixed(0)} days)`);
+        steps.push(`  Volatility: ${(sigma * 100).toFixed(1)}%, Risk-free rate: ${(r * 100).toFixed(1)}%`);
+        steps.push(`  Dividend yield: ${(q * 100).toFixed(2)}%`);
+        steps.push(`  d1 = ${d1.toFixed(4)}, d2 = ${d2.toFixed(4)}`);
+        steps.push(`  N(d1) = ${normCDF(d1).toFixed(4)}, N(d2) = ${normCDF(d2).toFixed(4)}`);
+        steps.push(`  Option price: $${price.toFixed(4)}`);
+        steps.push(`  Per contract ($${params.shares} shares): $${(price * params.shares).toFixed(2)}`);
+
+        return { success: true, result: `$${price.toFixed(4)}`, values: { price, d1, d2, per_contract: price * params.shares }, steps, message: `${params.option_type.toUpperCase()} price = $${price.toFixed(2)}` };
+      }
+
+      // ================================================================
+      // GREEKS
+      // ================================================================
+      if (params.operation === "greeks") {
+        if (params.option_type === undefined || params.spot === undefined || params.strike === undefined || params.volatility === undefined) {
+          return { success: false, result: "", steps, message: "Provide option_type, spot, strike, volatility" };
+        }
+        const S = params.spot;
+        const K = params.strike;
+        const sigma = params.volatility;
+
+        const d1 = (Math.log(S / K) + (r - q + 0.5 * sigma ** 2) * T) / (sigma * Math.sqrt(T));
+        const d2 = d1 - sigma * Math.sqrt(T);
+        const sqrtT = Math.sqrt(T);
+
+        let delta: number;
+        let theta: number;
+        let rho: number;
+
+        if (params.option_type === "call") {
+          delta = Math.exp(-q * T) * normCDF(d1);
+          theta = (-(S * Math.exp(-q * T) * normPDF(d1) * sigma) / (2 * sqrtT) - r * K * Math.exp(-r * T) * normCDF(d2) + q * S * Math.exp(-q * T) * normCDF(d1)) / 365;
+          rho = K * T * Math.exp(-r * T) * normCDF(d2) / 100;
+        } else {
+          delta = -Math.exp(-q * T) * normCDF(-d1);
+          theta = (-(S * Math.exp(-q * T) * normPDF(d1) * sigma) / (2 * sqrtT) + r * K * Math.exp(-r * T) * normCDF(-d2) - q * S * Math.exp(-q * T) * normCDF(-d1)) / 365;
+          rho = -K * T * Math.exp(-r * T) * normCDF(-d2) / 100;
+        }
+
+        const gamma = Math.exp(-q * T) * normPDF(d1) / (S * sigma * sqrtT);
+        const vega = S * Math.exp(-q * T) * normPDF(d1) * sqrtT / 100;
+
+        steps.push(`Options Greeks (${params.option_type.toUpperCase()}):`);
+        steps.push(`  Spot: $${S}, Strike: $${K}, IV: ${(sigma * 100).toFixed(1)}%`);
+        steps.push(`  Days to expiry: ${(T * 365).toFixed(0)}`);
+        steps.push(`  Delta: ${delta.toFixed(4)} (${(delta * 100).toFixed(1)}% — ${Math.abs(delta).toFixed(2)} shares per contract)`);
+        steps.push(`  Gamma: ${gamma.toFixed(6)} (delta change per $1 move)`);
+        steps.push(`  Theta: ${theta.toFixed(4)} per day (time decay)`);
+        steps.push(`  Vega: ${vega.toFixed(4)} per 1% IV change`);
+        steps.push(`  Rho: ${rho.toFixed(4)} per 1% rate change`);
+
+        return { success: true, result: `Delta=${delta.toFixed(3)}, Gamma=${gamma.toFixed(5)}, Theta=${theta.toFixed(3)}, Vega=${vega.toFixed(3)}`, values: { delta, gamma, theta, vega, rho }, steps, message: `Greeks: Δ=${delta.toFixed(2)}, θ=${theta.toFixed(2)}/day, ν=${vega.toFixed(2)}` };
+      }
+
+      // ================================================================
+      // IMPLIED VOLATILITY (Newton-Raphson)
+      // ================================================================
+      if (params.operation === "implied_volatility") {
+        if (params.option_type === undefined || params.spot === undefined || params.strike === undefined || params.premium === undefined) {
+          return { success: false, result: "", steps, message: "Provide option_type, spot, strike, and premium" };
+        }
+        const S = params.spot;
+        const K = params.strike;
+        const marketPrice = params.premium;
+        let sigma = 0.3; // Initial guess
+        const maxIter = 100;
+        const tolerance = 0.0001;
+
+        for (let i = 0; i < maxIter; i++) {
+          const d1 = (Math.log(S / K) + (r - q + 0.5 * sigma ** 2) * T) / (sigma * Math.sqrt(T));
+          const d2 = d1 - sigma * Math.sqrt(T);
+          let bsPrice: number;
+          if (params.option_type === "call") {
+            bsPrice = S * Math.exp(-q * T) * normCDF(d1) - K * Math.exp(-r * T) * normCDF(d2);
+          } else {
+            bsPrice = K * Math.exp(-r * T) * normCDF(-d2) - S * Math.exp(-q * T) * normCDF(-d1);
+          }
+          const vegaVal = S * Math.exp(-q * T) * normPDF(d1) * Math.sqrt(T);
+          const diff = bsPrice - marketPrice;
+          if (Math.abs(diff) < tolerance) break;
+          if (vegaVal === 0) break;
+          sigma = sigma - diff / vegaVal;
+          if (sigma <= 0) sigma = 0.001;
+        }
+
+        steps.push(`Implied Volatility Estimation (Newton-Raphson):`);
+        steps.push(`  Market premium: $${marketPrice}`);
+        steps.push(`  Spot: $${S}, Strike: $${K}, Days: ${(T * 365).toFixed(0)}`);
+        steps.push(`  Implied Volatility: ${(sigma * 100).toFixed(2)}%`);
+        steps.push(`  IV Rank context: ${sigma > 0.5 ? "HIGH (good for selling premium)" : sigma > 0.3 ? "MODERATE" : "LOW (premium may be cheap)"}`);
+
+        return { success: true, result: `IV = ${(sigma * 100).toFixed(2)}%`, values: { implied_volatility: sigma, iv_pct: sigma * 100 }, steps, message: `Implied Volatility = ${(sigma * 100).toFixed(1)}%` };
+      }
+
+      // ================================================================
+      // COVERED CALL ANALYSIS
+      // ================================================================
+      if (params.operation === "covered_call") {
+        if (params.spot === undefined || params.strike === undefined || params.premium === undefined) {
+          return { success: false, result: "", steps, message: "Provide spot, strike, and premium" };
+        }
+        const S = params.spot;
+        const K = params.strike;
+        const premium = params.premium;
+        const shares = params.shares;
+        const totalPremium = premium * shares;
+        const stockCost = S * shares;
+        const strikeValue = K * shares;
+        const maxProfit = (K - S + premium) * shares;
+        const breakeven = S - premium;
+        const staticReturn = (premium / S) * 100;
+        const annualizedReturn = staticReturn * (365 / (T * 365));
+        const ifAssignedReturn = ((K - S + premium) / S) * 100;
+        const otm = K > S;
+        const itm = K < S;
+        const distanceFromStrike = ((K - S) / S) * 100;
+
+        steps.push(`=== COVERED CALL ANALYSIS ===`);
+        steps.push(`  Stock price: $${S}`);
+        steps.push(`  Strike: $${K} (${otm ? "OTM" : itm ? "ITM" : "ATM"} — ${distanceFromStrike > 0 ? "+" : ""}${distanceFromStrike.toFixed(1)}% from spot)`);
+        steps.push(`  Premium: $${premium} per share ($${totalPremium.toFixed(2)} per contract)`);
+        steps.push(`  Days to expiry: ${(T * 365).toFixed(0)}`);
+        steps.push(``);
+        steps.push(`  Capital required: $${stockCost.toFixed(2)} (buying ${shares} shares)`);
+        steps.push(`  Premium income: $${totalPremium.toFixed(2)}`);
+        steps.push(`  Static return (if not assigned): ${staticReturn.toFixed(2)}%`);
+        steps.push(`  Annualized: ${annualizedReturn.toFixed(1)}%`);
+        steps.push(`  If assigned return: ${ifAssignedReturn.toFixed(2)}%`);
+        steps.push(`  Max profit: $${maxProfit.toFixed(2)} (if assigned at strike)`);
+        steps.push(`  Breakeven: $${breakeven.toFixed(2)}`);
+        steps.push(`  Downside protection: ${(premium / S * 100).toFixed(2)}% (premium offsets loss)`);
+        steps.push(``);
+        steps.push(`  Assignment probability: ${otm ? "LOW-MODERATE" : "HIGH (ITM)"}`);
+        steps.push(`  ${otm ? "Good for income while keeping shares" : "Likely assignment — be prepared to sell at strike"}`);
+
+        return {
+          success: true,
+          result: `Premium=$${totalPremium.toFixed(0)}, Static=${staticReturn.toFixed(1)}%, If assigned=${ifAssignedReturn.toFixed(1)}%`,
+          values: { total_premium: totalPremium, static_return: staticReturn, annualized_return: annualizedReturn, if_assigned_return: ifAssignedReturn, max_profit: maxProfit, breakeven, capital_required: stockCost, otm, distance_from_strike: distanceFromStrike },
+          steps,
+          message: `Covered call: $${totalPremium.toFixed(0)} premium (${staticReturn.toFixed(1)}% static, ${ifAssignedReturn.toFixed(1)}% if assigned)`,
+        };
+      }
+
+      // ================================================================
+      // CASH-SECURED PUT ANALYSIS
+      // ================================================================
+      if (params.operation === "cash_secured_put") {
+        if (params.spot === undefined || params.strike === undefined || params.premium === undefined) {
+          return { success: false, result: "", steps, message: "Provide spot, strike, and premium" };
+        }
+        const S = params.spot;
+        const K = params.strike;
+        const premium = params.premium;
+        const shares = params.shares;
+        const totalPremium = premium * shares;
+        const collateral = K * shares; // Cash secured = strike * shares
+        const breakeven = K - premium;
+        const maxLoss = (K - premium) * shares; // If stock goes to 0
+        const roi = (premium / K) * 100; // Return on collateral
+        const annualizedRoi = roi * (365 / (T * 365));
+        const otm = K < S;
+        const itm = K > S;
+        const distanceFromStrike = ((K - S) / S) * 100;
+        const costBasisIfAssigned = K - premium;
+
+        steps.push(`=== CASH-SECURED PUT ANALYSIS ===`);
+        steps.push(`  Stock price: $${S}`);
+        steps.push(`  Strike: $${K} (${otm ? "OTM" : itm ? "ITM" : "ATM"} — ${distanceFromStrike.toFixed(1)}% from spot)`);
+        steps.push(`  Premium: $${premium} per share ($${totalPremium.toFixed(2)} per contract)`);
+        steps.push(`  Days to expiry: ${(T * 365).toFixed(0)}`);
+        steps.push(``);
+        steps.push(`  Collateral required: $${collateral.toFixed(2)} (strike × ${shares} shares)`);
+        steps.push(`  Premium income: $${totalPremium.toFixed(2)}`);
+        steps.push(`  ROI on collateral: ${roi.toFixed(2)}%`);
+        steps.push(`  Annualized: ${annualizedRoi.toFixed(1)}%`);
+        steps.push(`  Breakeven: $${breakeven.toFixed(2)}`);
+        steps.push(`  Cost basis if assigned: $${costBasisIfAssigned.toFixed(2)}`);
+        steps.push(`  Max loss: $${maxLoss.toFixed(2)} (if stock → $0)`);
+        steps.push(`  Downside protection: ${(premium / K * 100).toFixed(2)}%`);
+        steps.push(``);
+        steps.push(`  Assignment probability: ${otm ? "LOW-MODERATE" : "HIGH (ITM)"}`);
+        steps.push(`  ${otm ? "Good for collecting premium / acquiring stock at discount" : "Likely assignment — be prepared to buy at strike"}`);
+
+        return {
+          success: true,
+          result: `Premium=$${totalPremium.toFixed(0)}, ROI=${roi.toFixed(1)}%, Breakeven=$${breakeven.toFixed(2)}`,
+          values: { total_premium: totalPremium, collateral, roi, annualized_roi: annualizedRoi, breakeven, cost_basis_if_assigned: costBasisIfAssigned, max_loss: maxLoss, otm, distance_from_strike: distanceFromStrike },
+          steps,
+          message: `Cash-secured put: $${totalPremium.toFixed(0)} premium (${roi.toFixed(1)}% ROI, breakeven $${breakeven.toFixed(2)})`,
+        };
+      }
+
+      // ================================================================
+      // WHEEL STRATEGY EVALUATION
+      // ================================================================
+      if (params.operation === "wheel_strategy") {
+        if (params.spot === undefined) {
+          return { success: false, result: "", steps, message: "Provide spot (current stock price)" };
+        }
+        const S = params.spot;
+        const K = params.strike ?? S * 0.95; // Default: 5% OTM put
+        const premium = params.premium ?? S * 0.02; // Default: ~2% premium estimate
+        const shares = params.shares;
+        const totalPremium = premium * shares;
+
+        steps.push(`=== WHEEL STRATEGY EVALUATION ===`);
+        steps.push(``);
+        steps.push(`The Wheel Strategy:`);
+        steps.push(`  Step 1: Sell cash-secured puts → collect premium`);
+        steps.push(`  Step 2: If assigned → buy 100 shares at strike`);
+        steps.push(`  Step 3: Sell covered calls on those shares → collect premium`);
+        steps.push(`  Step 4: If called away → sell shares at strike, repeat from Step 1`);
+        steps.push(``);
+
+        // Put leg analysis
+        const putCollateral = K * shares;
+        const putBreakeven = K - premium;
+        const putRoi = (premium / K) * 100;
+        const putOtm = K < S;
+        const putDistance = ((K - S) / S) * 100;
+
+        steps.push(`--- LEG 1: SELL CASH-SECURED PUT ---`);
+        steps.push(`  Strike: $${K} (${putOtm ? "OTM" : "ITM"}, ${putDistance.toFixed(1)}% from spot)`);
+        steps.push(`  Premium: $${premium}/share ($${totalPremium.toFixed(2)}/contract)`);
+        steps.push(`  Collateral: $${putCollateral.toFixed(2)}`);
+        steps.push(`  ROI: ${putRoi.toFixed(2)}%`);
+        steps.push(`  Breakeven: $${putBreakeven.toFixed(2)}`);
+        steps.push(`  Cost basis if assigned: $${putBreakeven.toFixed(2)}`);
+        steps.push(``);
+
+        // Call leg (if assigned)
+        const callStrike = S * 1.05; // 5% above current for covered call
+        const callPremium = S * 0.02; // Estimated
+        const callMaxProfit = (callStrike - putBreakeven + callPremium) * shares;
+
+        steps.push(`--- LEG 2: SELL COVERED CALL (if assigned) ---`);
+        steps.push(`  Strike: $${callStrike.toFixed(2)} (5% above spot)`);
+        steps.push(`  Est. premium: $${callPremium.toFixed(2)}/share`);
+        steps.push(`  Max profit: $${callMaxProfit.toFixed(2)} (from put breakeven to call strike + premium)`);
+        steps.push(``);
+
+        // Total cycle estimate
+        const totalCycleIncome = totalPremium + (callPremium * shares);
+        const cycleReturn = (totalCycleIncome / putCollateral) * 100;
+        steps.push(`--- FULL CYCLE ESTIMATE ---`);
+        steps.push(`  Put premium: $${totalPremium.toFixed(2)}`);
+        steps.push(`  Call premium: $${(callPremium * shares).toFixed(2)}`);
+        steps.push(`  Total income: $${totalCycleIncome.toFixed(2)}`);
+        steps.push(`  Cycle return: ${cycleReturn.toFixed(2)}% on $${putCollateral.toFixed(0)} collateral`);
+        steps.push(``);
+
+        // Strike selection guidance
+        steps.push(`--- STRIKE SELECTION GUIDANCE ---`);
+        if (putDistance < -2) {
+          steps.push(`  ⚠ Put strike is ITM — higher assignment risk, more premium but less downside protection`);
+        } else if (putDistance > 5) {
+          steps.push(`  ⚠ Put strike is far OTM — safer but low premium, may not be worth the collateral`);
+        } else {
+          steps.push(`  ✓ Put strike is in the sweet spot (2-5% OTM) — good premium/assignment balance`);
+        }
+        steps.push(`  Optimal: Sell puts at strikes where you're COMFORTABLE buying the stock`);
+        steps.push(`  Target: 0.3-0.5 delta (~30-50% assignment probability) for good premium/risk`);
+        steps.push(`  IV > 30%: Good environment for selling premium`);
+        steps.push(`  IV < 15%: Premium too low — consider other strategies`);
+
+        return {
+          success: true,
+          result: `Wheel: Put ROI=${putRoi.toFixed(1)}%, Cycle return=${cycleReturn.toFixed(1)}%`,
+          values: {
+            put_strike: K, put_premium: premium, put_collateral: putCollateral,
+            put_breakeven: putBreakeven, put_roi: putRoi,
+            call_strike: callStrike, call_premium: callPremium,
+            total_cycle_income: totalCycleIncome, cycle_return: cycleReturn,
+          },
+          steps,
+          message: `Wheel strategy: ~${cycleReturn.toFixed(1)}% per cycle, breakeven $${putBreakeven.toFixed(2)}`,
+        };
+      }
+
+      return { success: false, result: "", steps, message: "Unknown operation" };
+    } catch (e: any) {
+      return { success: false, result: "", steps, message: e.message ?? String(e) };
+    }
+  },
+};
