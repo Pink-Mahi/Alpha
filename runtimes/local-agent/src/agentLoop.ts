@@ -138,6 +138,7 @@ ADVANCED CAPABILITIES:
 - MEDICAL LABS: Use medical.lab to interpret lab results (normal ranges, causes of abnormal values, clinical notes). Available: CBC, BMP, lipid_panel, LFT, TSH, HbA1c, INR, CRP, D-dimer, troponin. Provide patient values for interpretation.
 - ELECTRONICS: Use circuit.analyze for circuit calculations (Ohm's law, power, series/parallel resistance, voltage/current dividers, RC/RL time constants, RC charging/discharging, impedance). Use semiconductor.solve for diode equations, Zener regulators, LED resistors, transistor biasing, MOSFET operation, rectifiers, and semiconductor physics. Use digital.logic for truth tables, Boolean expression evaluation, simplification rules, number system conversions (binary/hex/octal/decimal), adders, and flip-flops.
 - MAGNETISM: Use magnetism.solve for electromagnetic problems: magnetic force on charges and wires, magnetic fields from wires/solenoids/loops, Faraday's law, magnetic flux, transformer equations, Lenz's law, and Ampere's law.
+- FINANCE: Use finance.calculate for financial calculations: compound interest, simple interest, loan/mortgage payments, future/present value, annuities, NPV, IRR, ROI, bond pricing, inflation adjustment, and full amortization schedules. Use economics.indicators for CPI, inflation rate, GDP deflator, real GDP, real wage, unemployment rate, labor force participation, and purchasing power parity.
 
 SELF-LEARNING:
 - You have a memory system. Use memory.recall at the start of every task to recall relevant lessons from past work.
