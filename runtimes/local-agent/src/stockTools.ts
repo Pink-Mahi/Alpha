@@ -4412,3 +4412,385 @@ export const stockPortfolio: ToolDef = {
     }
   },
 };
+
+// =============================================================================
+// STOCK BACKTEST — Strategy backtesting on historical data
+// =============================================================================
+
+export const stockBacktest: ToolDef = {
+  name: "stock.backtest",
+  description: "Backtest trading strategies on historical price data. Simulates the wheel strategy (cash-secured puts + covered calls) and simple signal-based strategies over 1-5 years of data. Calculates win rate, average return, max drawdown, Sharpe ratio, profit factor, and trade-by-trade results. Helps validate strategies before risking real capital.",
+  inputSchema: z.object({
+    operation: z.enum(["wheel", "signal", "buy_hold", "list"]).describe("Backtest strategy"),
+    symbol: z.string().optional().describe("Stock ticker (fetches historical data from Yahoo)"),
+    closes: z.array(z.number()).optional().describe("Historical close prices (alternative to symbol)"),
+    dates: z.array(z.string()).optional().describe("Corresponding dates for closes"),
+    initial_capital: z.number().default(10000).describe("Starting capital"),
+    // Wheel strategy params
+    put_delta: z.number().default(0.3).describe("Target delta for selling puts"),
+    put_premium_pct: z.number().default(0.01).describe("Put premium as % of strike (estimated)"),
+    call_premium_pct: z.number().default(0.01).describe("Call premium as % of spot (estimated)"),
+    dte: z.number().default(30).describe("Days to expiration for sold options"),
+    // Signal strategy params
+    fast_period: z.number().default(20).describe("Fast MA period (signal strategy)"),
+    slow_period: z.number().default(50).describe("Slow MA period (signal strategy)"),
+    rsi_period: z.number().default(14).describe("RSI period (signal strategy)"),
+    rsi_oversold: z.number().default(30).describe("RSI oversold threshold"),
+    rsi_overbought: z.number().default(70).describe("RSI overbought threshold"),
+  }),
+  outputSchema: z.object({
+    success: z.boolean(),
+    result: z.string(),
+    backtest: z.record(z.any()).optional(),
+    steps: z.array(z.string()),
+    message: z.string(),
+  }),
+  permissionsRequired: [],
+  sideEffect: "read",
+  requiresApproval: false,
+  async execute(params) {
+    const steps: string[] = [];
+
+    try {
+      if (params.operation === "list") {
+        const list = [
+          "wheel: Backtest the wheel strategy (sell puts → assigned → sell calls → called away → repeat)",
+          "signal: Backtest MA crossover + RSI signal strategy (buy on golden cross + oversold, sell on death cross + overbought)",
+          "buy_hold: Buy and hold benchmark for comparison",
+        ].join("\n");
+        return { success: true, result: list, steps, message: "Available backtest strategies" };
+      }
+
+      // Get historical data
+      let closes = params.closes ?? [];
+      let dates = params.dates ?? [];
+
+      if (closes.length === 0 && params.symbol) {
+        const symbol = params.symbol.toUpperCase();
+        steps.push(`Fetching 2-year historical data for ${symbol}...`);
+        try {
+          const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=2y&interval=1d`;
+          const resp = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } });
+          if (!resp.ok) {
+            return { success: false, result: "", steps, message: `Failed to fetch data for ${symbol}` };
+          }
+          const data = await resp.json() as any;
+          const result = data?.chart?.result?.[0];
+          const timestamps: number[] = result?.timestamp || [];
+          const quotes = result?.indicators?.quote?.[0];
+          closes = (quotes?.close || []).filter((c: any) => c !== null && c !== undefined);
+          dates = timestamps.map((t: number) => new Date(t * 1000).toISOString().split("T")[0]!);
+          steps.push(`Retrieved ${closes.length} data points`);
+        } catch (e: any) {
+          return { success: false, result: "", steps, message: `Failed to fetch: ${e.message}` };
+        }
+      }
+
+      if (closes.length < 60) {
+        return { success: false, result: "", steps, message: `Need at least 60 data points, got ${closes.length}` };
+      }
+
+      // Helper: calculate SMA
+      function sma(data: number[], period: number, idx: number): number {
+        if (idx < period - 1) return 0;
+        let sum = 0;
+        for (let i = idx - period + 1; i <= idx; i++) sum += data[i]!;
+        return sum / period;
+      }
+
+      // Helper: calculate RSI
+      function rsi(data: number[], period: number, idx: number): number {
+        if (idx < period) return 50;
+        let gains = 0, losses = 0;
+        for (let i = idx - period + 1; i <= idx; i++) {
+          if (i > 0) {
+            const change = data[i]! - data[i - 1]!;
+            if (change > 0) gains += change;
+            else losses -= change;
+          }
+        }
+        const avgGain = gains / period;
+        const avgLoss = losses / period;
+        if (avgLoss === 0) return 100;
+        const rs = avgGain / avgLoss;
+        return 100 - (100 / (1 + rs));
+      }
+
+      // Helper: calculate max drawdown
+      function maxDrawdown(equity: number[]): number {
+        let peak = equity[0] ?? 0;
+        let maxDD = 0;
+        for (const v of equity) {
+          if (v > peak) peak = v;
+          const dd = (peak - v) / peak;
+          if (dd > maxDD) maxDD = dd;
+        }
+        return maxDD * 100;
+      }
+
+      // Helper: calculate Sharpe ratio (annualized, rf=0)
+      function sharpe(equity: number[]): number {
+        const returns: number[] = [];
+        for (let i = 1; i < equity.length; i++) {
+          if (equity[i - 1]! > 0) returns.push((equity[i]! - equity[i - 1]!) / equity[i - 1]!);
+        }
+        if (returns.length === 0) return 0;
+        const mean = returns.reduce((a, b) => a + b, 0) / returns.length;
+        const std = Math.sqrt(returns.reduce((s, r) => s + (r - mean) ** 2, 0) / returns.length);
+        if (std === 0) return 0;
+        return (mean / std) * Math.sqrt(252); // Annualized
+      }
+
+      switch (params.operation) {
+        // ================================================================
+        // WHEEL STRATEGY BACKTEST
+        // ================================================================
+        case "wheel": {
+          const capital = params.initial_capital;
+          const dte = params.dte;
+          const putPremPct = params.put_premium_pct;
+          const callPremPct = params.call_premium_pct;
+
+          let cash = capital;
+          let shares = 0;
+          let costBasis = 0;
+          const equity: number[] = [];
+          const trades: Array<Record<string, any>> = [];
+          let cycle = 0;
+
+          // Simulate: every dte days, sell a put or call
+          let i = 0;
+          while (i < closes.length) {
+            const price = closes[i]!;
+
+            if (shares === 0) {
+              // Step 1: Sell cash-secured put
+              // Estimate strike at target delta (simplified: 5% OTM)
+              const strike = price * (1 - 0.05);
+              const premium = strike * putPremPct;
+              cash += premium * 100; // Collect premium
+
+              // Check if assigned at expiry (price < strike)
+              const expiryIdx = Math.min(i + dte, closes.length - 1);
+              const expiryPrice = closes[expiryIdx]!;
+
+              if (expiryPrice < strike) {
+                // Assigned — buy 100 shares at strike
+                shares = 100;
+                costBasis = strike;
+                cash -= strike * 100;
+                trades.push({ date: dates[expiryIdx], action: "PUT ASSIGNED", price: expiryPrice, strike, premium, shares, cash });
+                cycle++;
+              } else {
+                // Put expires worthless — keep premium
+                trades.push({ date: dates[expiryIdx], action: "PUT EXPIRED", price: expiryPrice, strike, premium, shares, cash });
+              }
+              i = expiryIdx + 1;
+            } else {
+              // Step 2: Sell covered call
+              const strike = price * (1 + 0.05);
+              const premium = price * callPremPct;
+              cash += premium * 100;
+
+              const expiryIdx = Math.min(i + dte, closes.length - 1);
+              const expiryPrice = closes[expiryIdx]!;
+
+              if (expiryPrice > strike) {
+                // Called away — sell 100 shares at strike
+                cash += strike * 100;
+                const profit = (strike - costBasis) * 100 + premium * 100;
+                trades.push({ date: dates[expiryIdx], action: "CALLED AWAY", price: expiryPrice, strike, premium, profit, shares: 0, cash });
+                shares = 0;
+                costBasis = 0;
+                cycle++;
+              } else {
+                // Call expires worthless — keep premium, still hold shares
+                trades.push({ date: dates[expiryIdx], action: "CALL EXPIRED", price: expiryPrice, strike, premium, shares, cash });
+              }
+              i = expiryIdx + 1;
+            }
+
+            // Track equity
+            const currentEquity = cash + shares * price;
+            equity.push(currentEquity);
+          }
+
+          // Final equity
+          const finalEquity = cash + shares * (closes[closes.length - 1] ?? 0);
+          const totalReturn = ((finalEquity - capital) / capital) * 100;
+          const maxDD = maxDrawdown(equity);
+          const sharpeRatio = sharpe(equity);
+          const wins = trades.filter((t) => t.action === "PUT EXPIRED" || t.action === "CALL EXPIRED" || (t.profit ?? 0) > 0).length;
+          const losses = trades.filter((t) => t.action === "PUT ASSIGNED" || (t.profit ?? 0) < 0).length;
+          const winRate = trades.length > 0 ? (wins / trades.length) * 100 : 0;
+
+          steps.push(`=== WHEEL STRATEGY BACKTEST ===`);
+          if (params.symbol) steps.push(`Symbol: ${params.symbol.toUpperCase()}`);
+          steps.push(`Period: ${dates[0]} to ${dates[dates.length - 1]} (${closes.length} days)`);
+          steps.push(`Initial capital: $${capital.toLocaleString()}`);
+          steps.push(`DTE: ${dte} days, Put premium: ${putPremPct * 100}% of strike, Call premium: ${callPremPct * 100}% of spot`);
+          steps.push(``);
+          steps.push(`RESULTS:`);
+          steps.push(`  Final equity: $${finalEquity.toFixed(2)}`);
+          steps.push(`  Total return: ${totalReturn.toFixed(2)}%`);
+          steps.push(`  Max drawdown: ${maxDD.toFixed(2)}%`);
+          steps.push(`  Sharpe ratio: ${sharpeRatio.toFixed(2)}`);
+          steps.push(`  Completed wheel cycles: ${cycle}`);
+          steps.push(`  Total trades: ${trades.length}`);
+          steps.push(`  Win rate: ${winRate.toFixed(1)}% (${wins} wins, ${losses} losses)`);
+          steps.push(``);
+          steps.push(`  Trade log (last 10):`);
+          for (const t of trades.slice(-10)) {
+            steps.push(`    ${t.date}: ${t.action} @ $${t.price?.toFixed(2)} (strike $${t.strike?.toFixed(2)}, premium $${t.premium?.toFixed(2)}) → equity $${t.cash?.toFixed(2)}`);
+          }
+
+          // Buy & hold comparison
+          const bhReturn = (((closes[closes.length - 1] ?? 0) - closes[0]!) / closes[0]!) * 100;
+          steps.push(``);
+          steps.push(`  Buy & hold return: ${bhReturn.toFixed(2)}%`);
+          steps.push(`  Wheel vs B&H: ${totalReturn > bhReturn ? "OUTPERFORMED" : "UNDERPERFORMED"} by ${Math.abs(totalReturn - bhReturn).toFixed(2)}%`);
+
+          return {
+            success: true,
+            result: `Wheel: ${totalReturn.toFixed(1)}% return, ${winRate.toFixed(0)}% win rate, Sharpe ${sharpeRatio.toFixed(2)}`,
+            backtest: { strategy: "wheel", final_equity: finalEquity, total_return: totalReturn, max_drawdown: maxDD, sharpe: sharpeRatio, cycles: cycle, trades: trades.length, win_rate: winRate, wins, losses, buy_hold_return: bhReturn, trades_log: trades.slice(-20) },
+            steps,
+            message: `Wheel backtest: ${totalReturn.toFixed(1)}% return vs ${bhReturn.toFixed(1)}% buy-hold, ${winRate.toFixed(0)}% win rate`,
+          };
+        }
+
+        // ================================================================
+        // SIGNAL STRATEGY BACKTEST (MA crossover + RSI)
+        // ================================================================
+        case "signal": {
+          const capital = params.initial_capital;
+          const fast = params.fast_period;
+          const slow = params.slow_period;
+          const rsiPeriod = params.rsi_period;
+
+          let cash = capital;
+          let shares = 0;
+          const equity: number[] = [];
+          const trades: Array<Record<string, any>> = [];
+          let position = "FLAT";
+
+          for (let i = slow; i < closes.length; i++) {
+            const fastMA = sma(closes, fast, i);
+            const slowMA = sma(closes, slow, i);
+            const rsiVal = rsi(closes, rsiPeriod, i);
+            const price = closes[i]!;
+
+            // Buy signal: fast MA crosses above slow MA (golden cross) + RSI not overbought
+            if (position === "FLAT" && fastMA > slowMA && rsiVal < params.rsi_overbought) {
+              shares = Math.floor(cash / price);
+              cash -= shares * price;
+              position = "LONG";
+              trades.push({ date: dates[i], action: "BUY", price, shares, cash, fast_ma: fastMA, slow_ma: slowMA, rsi: rsiVal });
+            }
+            // Sell signal: fast MA crosses below slow MA (death cross) OR RSI overbought
+            else if (position === "LONG" && (fastMA < slowMA || rsiVal > params.rsi_overbought)) {
+              cash += shares * price;
+              trades.push({ date: dates[i], action: "SELL", price, shares: 0, cash, fast_ma: fastMA, slow_ma: slowMA, rsi: rsiVal });
+              shares = 0;
+              position = "FLAT";
+            }
+
+            equity.push(cash + shares * price);
+          }
+
+          // Close position at end
+          if (shares > 0) {
+            const finalPrice = closes[closes.length - 1]!;
+            cash += shares * finalPrice;
+            shares = 0;
+          }
+
+          const finalEquity = cash;
+          const totalReturn = ((finalEquity - capital) / capital) * 100;
+          const maxDD = maxDrawdown(equity);
+          const sharpeRatio = sharpe(equity);
+          const wins = trades.filter((t, i) => t.action === "SELL" && i > 0 && t.price > trades[i - 1]!.price).length;
+          const sellTrades = trades.filter((t) => t.action === "SELL").length;
+          const winRate = sellTrades > 0 ? (wins / sellTrades) * 100 : 0;
+
+          steps.push(`=== SIGNAL STRATEGY BACKTEST ===`);
+          if (params.symbol) steps.push(`Symbol: ${params.symbol.toUpperCase()}`);
+          steps.push(`Strategy: SMA(${fast})/${slow} crossover + RSI(${rsiPeriod}) filter`);
+          steps.push(`Period: ${dates[slow]} to ${dates[dates.length - 1]} (${closes.length - slow} trading days)`);
+          steps.push(``);
+          steps.push(`RESULTS:`);
+          steps.push(`  Final equity: $${finalEquity.toFixed(2)}`);
+          steps.push(`  Total return: ${totalReturn.toFixed(2)}%`);
+          steps.push(`  Max drawdown: ${maxDD.toFixed(2)}%`);
+          steps.push(`  Sharpe ratio: ${sharpeRatio.toFixed(2)}`);
+          steps.push(`  Total trades: ${trades.length} (${sellTrades} round-trips)`);
+          steps.push(`  Win rate: ${winRate.toFixed(1)}%`);
+          steps.push(``);
+          steps.push(`  Trade log:`);
+          for (const t of trades.slice(-15)) {
+            steps.push(`    ${t.date}: ${t.action} @ $${t.price?.toFixed(2)} (SMA${fast}=${t.fast_ma?.toFixed(2)}, SMA${slow}=${t.slow_ma?.toFixed(2)}, RSI=${t.rsi?.toFixed(1)})`);
+          }
+
+          const bhReturn = (((closes[closes.length - 1] ?? 0) - closes[0]!) / closes[0]!) * 100;
+          steps.push(``);
+          steps.push(`  Buy & hold return: ${bhReturn.toFixed(2)}%`);
+          steps.push(`  Signal vs B&H: ${totalReturn > bhReturn ? "OUTPERFORMED" : "UNDERPERFORMED"} by ${Math.abs(totalReturn - bhReturn).toFixed(2)}%`);
+
+          return {
+            success: true,
+            result: `Signal: ${totalReturn.toFixed(1)}% return, ${winRate.toFixed(0)}% win rate, Sharpe ${sharpeRatio.toFixed(2)}`,
+            backtest: { strategy: "signal", final_equity: finalEquity, total_return: totalReturn, max_drawdown: maxDD, sharpe: sharpeRatio, trades: trades.length, win_rate: winRate, buy_hold_return: bhReturn, trades_log: trades.slice(-20) },
+            steps,
+            message: `Signal backtest: ${totalReturn.toFixed(1)}% return vs ${bhReturn.toFixed(1)}% buy-hold, ${winRate.toFixed(0)}% win rate`,
+          };
+        }
+
+        // ================================================================
+        // BUY & HOLD BENCHMARK
+        // ================================================================
+        case "buy_hold": {
+          const capital = params.initial_capital;
+          const startPrice = closes[0]!;
+          const endPrice = closes[closes.length - 1]!;
+          const shares = Math.floor(capital / startPrice);
+          const remaining = capital - shares * startPrice;
+          const finalEquity = shares * endPrice + remaining;
+          const totalReturn = ((finalEquity - capital) / capital) * 100;
+
+          // Build equity curve
+          const equity: number[] = [];
+          for (const price of closes) {
+            equity.push(shares * price + remaining);
+          }
+          const maxDD = maxDrawdown(equity);
+          const sharpeRatio = sharpe(equity);
+
+          steps.push(`=== BUY & HOLD BENCHMARK ===`);
+          if (params.symbol) steps.push(`Symbol: ${params.symbol.toUpperCase()}`);
+          steps.push(`Period: ${dates[0]} to ${dates[dates.length - 1]} (${closes.length} days)`);
+          steps.push(``);
+          steps.push(`  Initial capital: $${capital.toLocaleString()}`);
+          steps.push(`  Shares bought: ${shares} @ $${startPrice.toFixed(2)}`);
+          steps.push(`  Final price: $${endPrice.toFixed(2)}`);
+          steps.push(`  Final equity: $${finalEquity.toFixed(2)}`);
+          steps.push(`  Total return: ${totalReturn.toFixed(2)}%`);
+          steps.push(`  Max drawdown: ${maxDD.toFixed(2)}%`);
+          steps.push(`  Sharpe ratio: ${sharpeRatio.toFixed(2)}`);
+
+          return {
+            success: true,
+            result: `B&H: ${totalReturn.toFixed(1)}% return, max DD ${maxDD.toFixed(1)}%, Sharpe ${sharpeRatio.toFixed(2)}`,
+            backtest: { strategy: "buy_hold", final_equity: finalEquity, total_return: totalReturn, max_drawdown: maxDD, sharpe: sharpeRatio, shares, start_price: startPrice, end_price: endPrice },
+            steps,
+            message: `Buy & hold: ${totalReturn.toFixed(1)}% return, Sharpe ${sharpeRatio.toFixed(2)}`,
+          };
+        }
+
+        default:
+          return { success: false, result: "", steps, message: "Unknown operation" };
+      }
+    } catch (e: any) {
+      return { success: false, result: "", steps, message: e.message ?? String(e) };
+    }
+  },
+};
