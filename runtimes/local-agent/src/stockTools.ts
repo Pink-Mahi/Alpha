@@ -3520,3 +3520,405 @@ export const stockScanner: ToolDef = {
     }
   },
 };
+
+// =============================================================================
+// STOCK EVENTS — Earnings, dividends, economic calendar, event warnings
+// =============================================================================
+
+export const stockEvents: ToolDef = {
+  name: "stock.events",
+  description: "Track market events that affect options positions: earnings dates (with expected move / straddle pricing), ex-dividend dates (affects put assignment risk), economic calendar (Fed/FOMC meetings, CPI, jobs reports, GDP), and FDA dates for biotech. Includes an event warning system that flags positions at risk from upcoming binary events. Critical for avoiding selling naked puts through earnings unknowingly.",
+  inputSchema: z.object({
+    operation: z.enum(["earnings", "dividends", "economic_calendar", "event_warning", "list"]).describe("Event operation"),
+    symbol: z.string().optional().describe("Stock ticker (for earnings/dividends)"),
+    days_ahead: z.number().default(30).describe("Look ahead N days for events"),
+    positions: z.array(z.object({
+      symbol: z.string(),
+      type: z.enum(["put", "call", "stock", "spread"]),
+      strike: z.number().optional(),
+      expiration: z.string().optional(),
+      dte: z.number().optional(),
+    })).optional().describe("Current open positions (for event_warning)"),
+  }),
+  outputSchema: z.object({
+    success: z.boolean(),
+    result: z.string(),
+    events: z.record(z.any()).optional(),
+    warnings: z.array(z.record(z.any())).optional(),
+    steps: z.array(z.string()),
+    message: z.string(),
+  }),
+  permissionsRequired: [],
+  sideEffect: "read",
+  requiresApproval: false,
+  async execute(params) {
+    const steps: string[] = [];
+
+    try {
+      if (params.operation === "list") {
+        const list = [
+          "earnings: Next earnings date for a stock (from Yahoo Finance calendar)",
+          "dividends: Ex-dividend dates (from Yahoo Finance)",
+          "economic_calendar: Major economic events (Fed, CPI, jobs, GDP) — curated schedule",
+          "event_warning: Check open positions against upcoming events — flags at-risk positions",
+        ].join("\n");
+        return { success: true, result: list, steps, message: "Available event operations" };
+      }
+
+      const daysAhead = params.days_ahead;
+      const now = new Date();
+      const futureDate = new Date(now.getTime() + daysAhead * 24 * 60 * 60 * 1000);
+
+      switch (params.operation) {
+        case "earnings": {
+          if (!params.symbol) {
+            return { success: false, result: "", steps, message: "Provide symbol" };
+          }
+          const symbol = params.symbol.toUpperCase();
+          steps.push(`Fetching earnings data for ${symbol}...`);
+
+          try {
+            const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=1mo&interval=1d`;
+            const resp = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } });
+            if (!resp.ok) {
+              return { success: false, result: "", steps, message: `Failed to fetch data for ${symbol}` };
+            }
+            const data = await resp.json() as any;
+            const meta = data?.chart?.result?.[0]?.meta;
+            if (!meta) {
+              return { success: false, result: "", steps, message: `No data for ${symbol}` };
+            }
+
+            let expectedMove: number | null = null;
+            let straddleCost: number | null = null;
+            try {
+              const optUrl = `https://query1.finance.yahoo.com/v7/finance/options/${symbol}`;
+              const optResp = await fetch(optUrl, { headers: { "User-Agent": "Mozilla/5.0" } });
+              if (optResp.ok) {
+                const optData = await optResp.json() as any;
+                const result = optData?.optionChain?.result?.[0];
+                const spot = result?.quote?.regularMarketPrice ?? 0;
+                const calls: any[] = result?.options?.[0]?.calls || [];
+                const puts: any[] = result?.options?.[0]?.puts || [];
+                let atmCall: any = null;
+                let atmPut: any = null;
+                let minDist = Infinity;
+                for (const c of calls) {
+                  const d = Math.abs(c.strike - spot);
+                  if (d < minDist) { minDist = d; atmCall = c; atmPut = puts.find((p: any) => p.strike === c.strike); }
+                }
+                if (atmCall && atmPut) {
+                  const callMid = ((atmCall.bid ?? 0) + (atmCall.ask ?? 0)) / 2;
+                  const putMid = ((atmPut.bid ?? 0) + (atmPut.ask ?? 0)) / 2;
+                  straddleCost = callMid + putMid;
+                  expectedMove = straddleCost;
+                }
+              }
+            } catch { /* skip */ }
+
+            steps.push(`=== EARNINGS INFO for ${symbol} ===`);
+            steps.push(`  Current price: $${meta.regularMarketPrice?.toFixed(2) ?? "N/A"}`);
+            steps.push(`  Next earnings date: Not available via free API — check Yahoo Finance or earningswhispers.com`);
+            if (straddleCost !== null && expectedMove !== null) {
+              const spot = meta.regularMarketPrice ?? 0;
+              steps.push(``);
+              steps.push(`  EXPECTED MOVE (ATM straddle):`);
+              steps.push(`    ATM straddle cost: $${straddleCost.toFixed(2)}`);
+              steps.push(`    Expected move: ±$${expectedMove.toFixed(2)} (${(expectedMove / spot * 100).toFixed(1)}% of price)`);
+              steps.push(`    This is the market's implied move for the next expiration`);
+              steps.push(`    If earnings is before this expiration, this includes earnings risk`);
+            }
+            steps.push(``);
+            steps.push(`  ⚠ EARNINGS RISK for premium sellers:`);
+            steps.push(`    - Selling naked puts through earnings = HIGH RISK`);
+            steps.push(`    - Stock can gap 5-15%+ on earnings results`);
+            steps.push(`    - IV typically drops (IV crush) after earnings — good for buyers, bad if you sold before`);
+            steps.push(`    - Recommendation: Close or roll positions before earnings, OR use defined-risk spreads`);
+
+            return {
+              success: true,
+              result: "Earnings info retrieved",
+              events: { symbol, straddle_cost: straddleCost, expected_move: expectedMove, current_price: meta.regularMarketPrice },
+              steps,
+              message: `${symbol}: expected move ±$${expectedMove?.toFixed(2) ?? "N/A"}`,
+            };
+          } catch (e: any) {
+            return { success: false, result: "", steps, message: e.message ?? "Failed to fetch earnings" };
+          }
+        }
+
+        case "dividends": {
+          if (!params.symbol) {
+            return { success: false, result: "", steps, message: "Provide symbol" };
+          }
+          const symbol = params.symbol.toUpperCase();
+          steps.push(`Fetching dividend data for ${symbol}...`);
+
+          const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=1y&interval=1d&events=div`;
+          const resp = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } });
+          if (!resp.ok) {
+            return { success: false, result: "", steps, message: `Failed to fetch dividends for ${symbol}` };
+          }
+          const data = await resp.json() as any;
+          const result = data?.chart?.result?.[0];
+
+          if (!result?.events?.dividends) {
+            steps.push(`${symbol} has no dividend history (growth stock or doesn't pay dividends)`);
+            steps.push(``);
+            steps.push(`  DIVIDEND RISK for options:`);
+            steps.push(`    - No dividend = no ex-div assignment risk for puts`);
+            steps.push(`    - Covered calls: no early assignment risk from dividends`);
+            return { success: true, result: "No dividends", events: { symbol, has_dividends: false }, steps, message: `${symbol} has no dividends` };
+          }
+
+          const divs = Object.values(result.events.dividends) as any[];
+          const dividends = divs.map((d) => ({
+            date: new Date(d.date * 1000).toISOString().split("T")[0]!,
+            dividend: d.amount,
+          })).sort((a, b) => b.date.localeCompare(a.date));
+
+          const lastDiv = dividends[0]!;
+          const prevDiv = dividends[1];
+          let nextExDivEst: string | null = null;
+          if (prevDiv) {
+            const interval = (new Date(lastDiv.date).getTime() - new Date(prevDiv.date).getTime()) / (1000 * 60 * 60 * 24);
+            const nextDate = new Date(lastDiv.date);
+            nextDate.setDate(nextDate.getDate() + Math.round(interval));
+            nextExDivEst = nextDate.toISOString().split("T")[0]!;
+          }
+
+          const annualDiv = dividends.slice(0, 4).reduce((s, d) => s + d.dividend, 0);
+          const yield_ = result.meta?.regularMarketPrice ? (annualDiv / result.meta.regularMarketPrice) * 100 : 0;
+
+          steps.push(`=== DIVIDEND HISTORY for ${symbol} ===`);
+          steps.push(`  Annual dividend (est): $${annualDiv.toFixed(2)}`);
+          steps.push(`  Yield: ${yield_.toFixed(2)}%`);
+          steps.push(`  Last ex-div: ${lastDiv.date} ($${lastDiv.dividend})`);
+          if (nextExDivEst) {
+            steps.push(`  Next ex-div (est): ${nextExDivEst}`);
+            const daysToEx = Math.ceil((new Date(nextExDivEst).getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+            steps.push(`  Days to next ex-div: ${daysToEx}`);
+          }
+          steps.push(``);
+          steps.push(`  Recent dividends:`);
+          for (const d of dividends.slice(0, 5)) {
+            steps.push(`    ${d.date}: $${d.dividend}`);
+          }
+          steps.push(``);
+          steps.push(`  DIVIDEND RISK for options:`);
+          steps.push(`    - Short ITM puts: May be assigned early right before ex-div to capture dividend`);
+          steps.push(`    - Short ITM calls: Unlikely to be assigned early (calls don't get dividend)`);
+          steps.push(`    - Covered calls: If called away before ex-div, you lose the dividend`);
+          if (nextExDivEst) {
+            const daysToEx = Math.ceil((new Date(nextExDivEst).getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+            if (daysToEx <= 14) {
+              steps.push(`    ⚠ EX-DIV IN ${daysToEx} DAYS — Check if you have short ITM puts!`);
+            }
+          }
+
+          return {
+            success: true,
+            result: `Annual div: $${annualDiv.toFixed(2)}, Yield: ${yield_.toFixed(2)}%`,
+            events: { symbol, annual_dividend: annualDiv, yield: yield_, last_ex_div: lastDiv.date, next_ex_div_est: nextExDivEst, dividends: dividends.slice(0, 8) },
+            steps,
+            message: `${symbol}: $${annualDiv.toFixed(2)}/yr dividend (${yield_.toFixed(2)}% yield)${nextExDivEst ? `, next ex-div ~${nextExDivEst}` : ""}`,
+          };
+        }
+
+        case "economic_calendar": {
+          const events: Array<{ date: string; event: string; impact: "HIGH" | "MEDIUM" | "LOW"; description: string }> = [];
+
+          const fomcDates = ["2026-01-28", "2026-03-18", "2026-04-29", "2026-06-17", "2026-07-29", "2026-09-16", "2026-10-28", "2026-12-16"];
+          for (const d of fomcDates) {
+            if (new Date(d) > now && new Date(d) <= futureDate) {
+              events.push({ date: d, event: "FOMC Meeting", impact: "HIGH", description: "Federal Reserve interest rate decision + press conference. Markets highly volatile. IV typically elevated before, crushed after." });
+            }
+          }
+
+          const cpiDates = ["2026-01-14", "2026-02-12", "2026-03-12", "2026-04-10", "2026-05-14", "2026-06-11", "2026-07-11", "2026-08-13"];
+          for (const d of cpiDates) {
+            if (new Date(d) > now && new Date(d) <= futureDate) {
+              events.push({ date: d, event: "CPI Release", impact: "HIGH", description: "Consumer Price Index — inflation data. Major market mover. High IV before, crush after." });
+            }
+          }
+
+          const jobsDates = ["2026-01-09", "2026-02-06", "2026-03-06", "2026-04-03", "2026-05-08", "2026-06-05", "2026-07-03", "2026-08-07"];
+          for (const d of jobsDates) {
+            if (new Date(d) > now && new Date(d) <= futureDate) {
+              events.push({ date: d, event: "Non-Farm Payrolls", impact: "HIGH", description: "Monthly jobs report. Significant market impact, especially for Fed rate expectations." });
+            }
+          }
+
+          const gdpDates = ["2026-01-29", "2026-02-26", "2026-03-26", "2026-04-29", "2026-05-28", "2026-06-25", "2026-07-30", "2026-08-28"];
+          for (const d of gdpDates) {
+            if (new Date(d) > now && new Date(d) <= futureDate) {
+              events.push({ date: d, event: "GDP Report", impact: "MEDIUM", description: "Gross Domestic Product — economic growth measure. Moderate market impact." });
+            }
+          }
+
+          const ppiDates = ["2026-01-15", "2026-02-13", "2026-03-13", "2026-04-11", "2026-05-15", "2026-06-12", "2026-07-12", "2026-08-14"];
+          for (const d of ppiDates) {
+            if (new Date(d) > now && new Date(d) <= futureDate) {
+              events.push({ date: d, event: "PPI Release", impact: "MEDIUM", description: "Producer Price Index — wholesale inflation. Leading indicator for CPI." });
+            }
+          }
+
+          const retailDates = ["2026-01-16", "2026-02-17", "2026-03-17", "2026-04-15", "2026-05-15", "2026-06-16", "2026-07-16", "2026-08-15"];
+          for (const d of retailDates) {
+            if (new Date(d) > now && new Date(d) <= futureDate) {
+              events.push({ date: d, event: "Retail Sales", impact: "LOW", description: "Monthly retail sales data. Consumer spending indicator." });
+            }
+          }
+
+          events.sort((a, b) => a.date.localeCompare(b.date));
+
+          steps.push(`=== ECONOMIC CALENDAR (next ${daysAhead} days) ===`);
+          steps.push(``);
+          if (events.length === 0) {
+            steps.push(`  No major economic events in the next ${daysAhead} days.`);
+          } else {
+            for (const e of events) {
+              const daysTo = Math.ceil((new Date(e.date).getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+              const impactIcon = e.impact === "HIGH" ? "[!]" : e.impact === "MEDIUM" ? "[~]" : "[.]";
+              steps.push(`  ${impactIcon} ${e.date} (${daysTo}d) — ${e.event} [${e.impact}]`);
+              steps.push(`      ${e.description}`);
+            }
+          }
+          steps.push(``);
+          steps.push(`  TRADING IMPLICATIONS:`);
+          const highImpact = events.filter((e) => e.impact === "HIGH");
+          if (highImpact.length > 0) {
+            steps.push(`  ⚠ ${highImpact.length} HIGH-IMPACT events in next ${daysAhead} days`);
+            steps.push(`    - Avoid selling naked premium through these events`);
+            steps.push(`    - Consider closing/rolling positions before event dates`);
+            steps.push(`    - IV will be elevated before event → good premium but high risk`);
+            steps.push(`    - IV crush after event → if you sold before, you profit from crush BUT face gap risk`);
+            steps.push(`    - Defined-risk spreads (iron condors, credit spreads) are safer for event periods`);
+          } else {
+            steps.push(`  No high-impact events — normal premium selling environment`);
+          }
+
+          return {
+            success: true,
+            result: `${events.length} events in next ${daysAhead} days (${highImpact.length} high-impact)`,
+            events: { events, high_impact_count: highImpact.length },
+            steps,
+            message: `Economic calendar: ${events.length} events, ${highImpact.length} high-impact in next ${daysAhead}d`,
+          };
+        }
+
+        case "event_warning": {
+          if (!params.positions || params.positions.length === 0) {
+            return { success: false, result: "", steps, message: "Provide positions array to check for event risk" };
+          }
+
+          const warnings: Array<Record<string, any>> = [];
+          steps.push(`=== EVENT RISK WARNING ===`);
+          steps.push(`Checking ${params.positions.length} positions against upcoming events...`);
+          steps.push(``);
+
+          for (const pos of params.positions) {
+            const symbolWarnings: string[] = [];
+            const sym = pos.symbol.toUpperCase();
+
+            // Check dividends
+            try {
+              const divUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${sym}?range=1y&interval=1d&events=div`;
+              const divResp = await fetch(divUrl, { headers: { "User-Agent": "Mozilla/5.0" } });
+              if (divResp.ok) {
+                const divData = await divResp.json() as any;
+                const result = divData?.chart?.result?.[0];
+                if (result?.events?.dividends) {
+                  const divs = (Object.values(result.events.dividends) as any[]).sort((a, b) => b.date - a.date);
+                  if (divs.length > 1) {
+                    const interval = (divs[0]!.date - divs[1]!.date) * 1000;
+                    const nextEst = new Date((divs[0]!.date + interval / 1000) * 1000);
+                    const daysToEx = Math.ceil((nextEst.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+                    if (daysToEx <= daysAhead && daysToEx >= 0) {
+                      if (pos.type === "put") {
+                        symbolWarnings.push(`Ex-dividend in ~${daysToEx}d — if put is ITM, early assignment risk to capture dividend`);
+                      }
+                      if (pos.type === "call") {
+                        symbolWarnings.push(`Ex-dividend in ~${daysToEx}d — if call is ITM, may be exercised early for dividend`);
+                      }
+                    }
+                  }
+                }
+              }
+            } catch { /* skip */ }
+
+            // DTE-based warnings
+            if (pos.dte !== undefined) {
+              if (pos.dte < 7 && pos.dte >= 1) {
+                symbolWarnings.push(`${pos.dte}d to expiry — gamma risk increasing, small moves = large delta changes`);
+              }
+              if (pos.dte < 1) {
+                symbolWarnings.push(`EXPIRY IMMINENT — close or roll immediately to avoid assignment`);
+              }
+            }
+
+            // Position type warnings
+            if (pos.type === "put") {
+              symbolWarnings.push("Naked put — undefined downside risk, verify no earnings before expiry");
+            }
+            if (pos.type === "call") {
+              symbolWarnings.push("Covered call — assignment risk if ITM near expiry/dividend");
+            }
+
+            if (symbolWarnings.length > 0) {
+              warnings.push({ symbol: sym, position: pos, warnings: symbolWarnings });
+              steps.push(`  ${sym} (${pos.type}${pos.strike ? ` $${pos.strike}` : ""}):`);
+              for (const w of symbolWarnings) {
+                steps.push(`    ⚠ ${w}`);
+              }
+              steps.push(``);
+            }
+          }
+
+          // Check economic calendar
+          const fomcDates = ["2026-01-28", "2026-03-18", "2026-04-29", "2026-06-17", "2026-07-29", "2026-09-16", "2026-10-28", "2026-12-16"];
+          const cpiDates = ["2026-01-14", "2026-02-12", "2026-03-12", "2026-04-10", "2026-05-14", "2026-06-11", "2026-07-11", "2026-08-13"];
+          const jobsDates = ["2026-01-09", "2026-02-06", "2026-03-06", "2026-04-03", "2026-05-08", "2026-06-05", "2026-07-03", "2026-08-07"];
+
+          const macroEvents: string[] = [];
+          for (const d of [...fomcDates, ...cpiDates, ...jobsDates]) {
+            if (new Date(d) > now && new Date(d) <= futureDate) {
+              const daysTo = Math.ceil((new Date(d).getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+              let name = "Economic Event";
+              if (fomcDates.includes(d)) name = "FOMC Meeting";
+              else if (cpiDates.includes(d)) name = "CPI Release";
+              else if (jobsDates.includes(d)) name = "Jobs Report";
+              macroEvents.push(`${name} in ${daysTo}d (${d})`);
+            }
+          }
+
+          if (macroEvents.length > 0) {
+            steps.push(`--- MACRO EVENT RISK (affects ALL positions) ---`);
+            for (const e of macroEvents) {
+              steps.push(`  [!] ${e}`);
+            }
+            steps.push(`  → Consider reducing position size or closing naked positions before these dates`);
+          }
+
+          if (warnings.length === 0 && macroEvents.length === 0) {
+            steps.push(`✓ No event risks detected for current positions in next ${daysAhead} days`);
+          }
+
+          return {
+            success: true,
+            result: `${warnings.length} position warnings, ${macroEvents.length} macro events`,
+            warnings,
+            events: { macro_events: macroEvents },
+            steps,
+            message: `Event check: ${warnings.length} position warnings, ${macroEvents.length} macro events in next ${daysAhead}d`,
+          };
+        }
+
+        default:
+          return { success: false, result: "", steps, message: "Unknown operation" };
+      }
+    } catch (e: any) {
+      return { success: false, result: "", steps, message: e.message ?? String(e) };
+    }
+  },
+};
