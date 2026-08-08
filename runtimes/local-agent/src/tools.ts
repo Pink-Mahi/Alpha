@@ -26,6 +26,7 @@ import { medicalSymptoms, medicalDrug, medicalAnatomy, medicalLab } from "./medi
 import { circuitAnalyze, magnetismSolve, semiconductorSolve, digitalLogic } from "./electronicsTools.js";
 import { financeCalculate, economicsIndicators } from "./financeTools.js";
 import { statsDescribe, statsHypothesisTest, statsRegression, statsDistribution } from "./statisticsTools.js";
+import { mechanicalSolve, fluidMechanics, heatTransfer } from "./mechanicalTools.js";
 import type { ModelRouterClient } from "./modelRouterClient.js";
 
 import type { ToolDef, ToolContext } from "./toolBus.js";
@@ -474,4 +475,8 @@ export function registerBuiltinTools(bus: import("./toolBus.js").ToolBus, router
   bus.register(statsHypothesisTest);
   bus.register(statsRegression);
   bus.register(statsDistribution);
+  // Mechanical engineering tools
+  bus.register(mechanicalSolve);
+  bus.register(fluidMechanics);
+  bus.register(heatTransfer);
 }
