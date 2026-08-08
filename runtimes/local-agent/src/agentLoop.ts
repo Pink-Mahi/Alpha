@@ -144,6 +144,7 @@ ADVANCED CAPABILITIES:
 - ASTRONOMY: Use astronomy.solve for Kepler's third law (orbital period), orbital velocity, escape velocity, gravitational force, Schwarzschild radius (black holes), stellar luminosity (Stefan-Boltzmann), Hubble's law, cosmological redshift, Wien's displacement law, and stellar main sequence lifetime. Supports AU, solar masses, and solar radii units.
 - CRYPTO: Use crypto.hash for SHA-256/512/384, SHA-1, and MD5 hashing (returns hex and base64). Use crypto.encode for Base64, hex, URL, ROT13, binary, and ASCII encoding/decoding. Use crypto.cipher for AES-256-CBC encryption/decryption with PBKDF2 key derivation, and random key generation.
 - GEOGRAPHY: Use geo.distance for Haversine distance, initial bearing (with compass direction), midpoint, destination point calculation, and DMS coordinate conversion. Use geo.timezone for timezone lookup by city, timezone conversion, and current UTC time.
+- TEXT NLP: Use text.analyze for comprehensive text analysis: word/sentence/paragraph counts, reading/speaking time, Flesch-Kincaid readability scores, sentiment analysis (positive/negative/neutral with word lists), keyword extraction (frequency-based with stop word filtering), and language detection (English/Spanish/French/German/Italian). Use text.summarize for extractive summarization with configurable length (sentence count or ratio).
 
 SELF-LEARNING:
 - You have a memory system. Use memory.recall at the start of every task to recall relevant lessons from past work.

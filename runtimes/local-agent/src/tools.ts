@@ -30,6 +30,7 @@ import { mechanicalSolve, fluidMechanics, heatTransfer } from "./mechanicalTools
 import { astronomySolve } from "./astronomyTools.js";
 import { cryptoHash, cryptoEncode, cryptoCipher } from "./cryptoTools.js";
 import { geoDistance, geoTimezone } from "./geoTools.js";
+import { textAnalyze, textSummarize } from "./textTools.js";
 import type { ModelRouterClient } from "./modelRouterClient.js";
 
 import type { ToolDef, ToolContext } from "./toolBus.js";
@@ -491,4 +492,7 @@ export function registerBuiltinTools(bus: import("./toolBus.js").ToolBus, router
   // Geography tools
   bus.register(geoDistance);
   bus.register(geoTimezone);
+  // Text & NLP tools
+  bus.register(textAnalyze);
+  bus.register(textSummarize);
 }
