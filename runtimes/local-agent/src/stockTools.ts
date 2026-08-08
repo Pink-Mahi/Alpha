@@ -3171,3 +3171,352 @@ export const stockVolatility: ToolDef = {
     }
   },
 };
+
+// =============================================================================
+// STOCK SCANNER — Options chain scanner for optimal strike selection
+// =============================================================================
+
+export const stockScanner: ToolDef = {
+  name: "stock.scanner",
+  description: "Scan options chains to find optimal strikes for premium selling. Ranks puts and calls by delta (probability of profit), ROI per day (annualized premium / collateral / DTE), liquidity (volume + open interest), bid-ask spread tightness, and credit spread efficiency. Finds the best put to sell for cash-secured puts, best call for covered calls, and best spread combinations. Fetches live options chain from Yahoo Finance.",
+  inputSchema: z.object({
+    operation: z.enum(["scan_puts", "scan_calls", "scan_spreads", "best_strike", "list"]).describe("Scan operation"),
+    symbol: z.string().describe("Stock ticker symbol"),
+    expiration: z.string().optional().describe("Expiration date (YYYY-MM-DD). If omitted, uses nearest expiration"),
+    target_delta: z.number().default(0.3).describe("Target delta for optimal strike (0.3 = 70% profit probability)"),
+    min_volume: z.number().default(10).describe("Minimum volume for liquidity filter"),
+    min_open_interest: z.number().default(100).describe("Minimum open interest for liquidity filter"),
+    max_bid_ask_spread_pct: z.number().default(5).describe("Max bid-ask spread as % of premium (default 5%)"),
+    side: z.enum(["puts", "calls", "both"]).default("both").describe("Which side to scan (for best_strike)"),
+    spread_width: z.number().optional().describe("Credit spread width in dollars (for scan_spreads)"),
+    shares: z.number().default(100).describe("Shares per contract"),
+  }),
+  outputSchema: z.object({
+    success: z.boolean(),
+    result: z.string(),
+    scan: z.record(z.any()).optional(),
+    steps: z.array(z.string()),
+    message: z.string(),
+  }),
+  permissionsRequired: [],
+  sideEffect: "read",
+  requiresApproval: false,
+  async execute(params) {
+    const steps: string[] = [];
+
+    try {
+      if (params.operation === "list") {
+        const list = [
+          "scan_puts: Rank all puts by delta, ROI/day, liquidity, bid-ask spread",
+          "scan_calls: Rank all calls by delta, ROI/day, liquidity, bid-ask spread",
+          "scan_spreads: Find best credit spreads (bull put / bear call) by risk/reward",
+          "best_strike: Find single best strike matching target delta with liquidity filters",
+        ].join("\n");
+        return { success: true, result: list, steps, message: "Available scan operations" };
+      }
+
+      const symbol = params.symbol.toUpperCase();
+      steps.push(`Fetching options chain for ${symbol}...`);
+
+      let expDate = params.expiration;
+      let expEpoch: number;
+
+      if (!expDate) {
+        const expUrl = `https://query1.finance.yahoo.com/v7/finance/options/${symbol}`;
+        const expResp = await fetch(expUrl, { headers: { "User-Agent": "Mozilla/5.0" } });
+        if (!expResp.ok) {
+          return { success: false, result: "", steps, message: `Failed to fetch options for ${symbol} (${expResp.status})` };
+        }
+        const expData = await expResp.json() as any;
+        const exps: number[] = expData?.optionChain?.result?.[0]?.expirationDates || [];
+        if (exps.length === 0) {
+          return { success: false, result: "", steps, message: `No options data for ${symbol}` };
+        }
+        expEpoch = exps[0]!;
+        expDate = new Date(expEpoch * 1000).toISOString().split("T")[0]!;
+        steps.push(`Using nearest expiration: ${expDate}`);
+      } else {
+        expEpoch = Math.floor(new Date(expDate).getTime() / 1000);
+      }
+
+      const chainUrl = `https://query1.finance.yahoo.com/v7/finance/options/${symbol}?date=${expEpoch}`;
+      const chainResp = await fetch(chainUrl, { headers: { "User-Agent": "Mozilla/5.0" } });
+      if (!chainResp.ok) {
+        return { success: false, result: "", steps, message: `Failed to fetch chain (${chainResp.status})` };
+      }
+      const chainData = await chainResp.json() as any;
+      const result = chainData?.optionChain?.result?.[0];
+      if (!result) {
+        return { success: false, result: "", steps, message: `No chain data for ${symbol} at ${expDate}` };
+      }
+
+      const spot = result.quote?.regularMarketPrice ?? 0;
+      const calls: any[] = result.options?.[0]?.calls || [];
+      const puts: any[] = result.options?.[0]?.puts || [];
+      const dte = Math.max(1, Math.ceil((expEpoch * 1000 - Date.now()) / (1000 * 60 * 60 * 24)));
+
+      steps.push(`Spot: $${spot.toFixed(2)}, Expiration: ${expDate} (${dte}d), ${calls.length} calls, ${puts.length} puts`);
+      steps.push(``);
+
+      const shares = params.shares;
+      const minVol = params.min_volume;
+      const minOI = params.min_open_interest;
+      const maxSpreadPct = params.max_bid_ask_spread_pct;
+
+      function analyzeOption(opt: any, type: "call" | "put"): Record<string, any> {
+        const bid = opt.bid ?? 0;
+        const ask = opt.ask ?? 0;
+        const mid = (bid + ask) / 2;
+        const spread = ask - bid;
+        const spreadPct = mid > 0 ? (spread / mid) * 100 : 100;
+        const volume = opt.volume ?? 0;
+        const openInterest = opt.openInterest ?? 0;
+        const iv = opt.impliedVolatility ?? 0;
+        const delta = Math.abs(opt.delta ?? 0);
+        const strike = opt.strike;
+        const otm = type === "call" ? strike > spot : strike < spot;
+        const distancePct = ((strike - spot) / spot) * 100;
+
+        let roi = 0;
+        let roiPerDay = 0;
+        let annualizedRoi = 0;
+        let collateral = 0;
+
+        if (type === "put") {
+          collateral = strike * shares;
+          roi = mid > 0 ? (mid / strike) * 100 : 0;
+          roiPerDay = roi / dte;
+          annualizedRoi = roiPerDay * 365;
+        } else {
+          collateral = spot * shares;
+          roi = mid > 0 ? (mid / spot) * 100 : 0;
+          roiPerDay = roi / dte;
+          annualizedRoi = roiPerDay * 365;
+        }
+
+        const volScore = Math.min(50, (volume / minVol) * 25);
+        const oiScore = Math.min(50, (openInterest / minOI) * 25);
+        const liquidityScore = volScore + oiScore;
+        const deltaScore = Math.max(0, 100 - Math.abs(delta - params.target_delta) * 200);
+        const spreadScore = Math.max(0, 100 - spreadPct * 10);
+        const overallScore = (deltaScore * 0.3) + (liquidityScore * 0.25) + (roiPerDay * 50 * 0.25) + (spreadScore * 0.2);
+
+        return {
+          strike, type, bid, ask, mid, spread, spread_pct: spreadPct,
+          volume, open_interest: openInterest, iv, delta,
+          otm, distance_pct: distancePct,
+          premium: mid * shares, collateral,
+          roi, roi_per_day: roiPerDay, annualized_roi: annualizedRoi,
+          liquidity_score: liquidityScore, overall_score: overallScore,
+          profit_probability: (1 - delta) * 100,
+          passes_filter: volume >= minVol && openInterest >= minOI && spreadPct <= maxSpreadPct,
+        };
+      }
+
+      switch (params.operation) {
+        case "scan_puts": {
+          const analyzed = puts.map((p: any) => analyzeOption(p, "put"));
+          const filtered = analyzed.filter((p: Record<string, any>) => p.passes_filter && p.otm);
+          filtered.sort((a: Record<string, any>, b: Record<string, any>) => b.overall_score - a.overall_score);
+          const top10 = filtered.slice(0, 10);
+
+          steps.push(`=== PUT SCANNER (OTM puts only, filtered) ===`);
+          steps.push(`Filters: Vol >= ${minVol}, OI >= ${minOI}, Spread <= ${maxSpreadPct}%`);
+          steps.push(`Target delta: ${params.target_delta} (~${((1 - params.target_delta) * 100).toFixed(0)}% profit prob)`);
+          steps.push(`${filtered.length} puts pass filters out of ${puts.length} total`);
+          steps.push(``);
+          steps.push(`  Strike  | Delta | Premium | ROI%  | ROI/day | Ann%   | Vol  | OI    | Spread% | Score`);
+          steps.push(`  --------|-------|---------|-------|---------|--------|------|-------|---------|------`);
+          for (const p of top10) {
+            steps.push(`  $${p.strike.toFixed(0).padEnd(6)} | ${p.delta.toFixed(2)}  | $${p.mid.toFixed(2).padEnd(6)} | ${p.roi.toFixed(1).padEnd(5)} | ${p.roi_per_day.toFixed(3).padEnd(7)} | ${p.annualized_roi.toFixed(0).padEnd(6)} | ${String(p.volume).padEnd(4)} | ${String(p.open_interest).padEnd(5)} | ${p.spread_pct.toFixed(1).padEnd(7)} | ${p.overall_score.toFixed(0)}`);
+          }
+          if (top10.length > 0) {
+            const best = top10[0]!;
+            steps.push(``);
+            steps.push(`  BEST PUT: $${best.strike} strike`);
+            steps.push(`    Delta: ${best.delta.toFixed(2)} (${best.profit_probability.toFixed(0)}% profit probability)`);
+            steps.push(`    Premium: $${best.mid.toFixed(2)} ($${(best.mid * shares).toFixed(2)} per contract)`);
+            steps.push(`    ROI: ${best.roi.toFixed(2)}% (${best.roi_per_day.toFixed(3)}%/day, ${best.annualized_roi.toFixed(0)}% annualized)`);
+            steps.push(`    Collateral: $${best.collateral.toFixed(2)}`);
+            steps.push(`    Liquidity: Vol ${best.volume}, OI ${best.open_interest}`);
+          }
+
+          return {
+            success: true,
+            result: `${filtered.length} puts pass filters, best: $${top10[0]?.strike ?? "N/A"}`,
+            scan: { total_puts: puts.length, filtered: filtered.length, top_puts: top10, spot, expiration: expDate, dte },
+            steps,
+            message: `Best put: $${top10[0]?.strike ?? "N/A"} strike, ${top10[0]?.delta.toFixed(2) ?? "N/A"} delta, ${top10[0]?.roi.toFixed(1) ?? "N/A"}% ROI`,
+          };
+        }
+
+        case "scan_calls": {
+          const analyzed = calls.map((c: any) => analyzeOption(c, "call"));
+          const filtered = analyzed.filter((c: Record<string, any>) => c.passes_filter && c.otm);
+          filtered.sort((a: Record<string, any>, b: Record<string, any>) => b.overall_score - a.overall_score);
+          const top10 = filtered.slice(0, 10);
+
+          steps.push(`=== CALL SCANNER (OTM calls for covered calls) ===`);
+          steps.push(`Filters: Vol >= ${minVol}, OI >= ${minOI}, Spread <= ${maxSpreadPct}%`);
+          steps.push(`${filtered.length} calls pass filters out of ${calls.length} total`);
+          steps.push(``);
+          steps.push(`  Strike  | Delta | Premium | ROI%  | ROI/day | Ann%   | Vol  | OI    | Spread% | Score`);
+          steps.push(`  --------|-------|---------|-------|---------|--------|------|-------|---------|------`);
+          for (const c of top10) {
+            steps.push(`  $${c.strike.toFixed(0).padEnd(6)} | ${c.delta.toFixed(2)}  | $${c.mid.toFixed(2).padEnd(6)} | ${c.roi.toFixed(1).padEnd(5)} | ${c.roi_per_day.toFixed(3).padEnd(7)} | ${c.annualized_roi.toFixed(0).padEnd(6)} | ${String(c.volume).padEnd(4)} | ${String(c.open_interest).padEnd(5)} | ${c.spread_pct.toFixed(1).padEnd(7)} | ${c.overall_score.toFixed(0)}`);
+          }
+          if (top10.length > 0) {
+            const best = top10[0]!;
+            steps.push(``);
+            steps.push(`  BEST CALL: $${best.strike} strike`);
+            steps.push(`    Delta: ${best.delta.toFixed(2)} (${best.profit_probability.toFixed(0)}% profit probability)`);
+            steps.push(`    Premium: $${best.mid.toFixed(2)} ($${(best.mid * shares).toFixed(2)} per contract)`);
+            steps.push(`    ROI: ${best.roi.toFixed(2)}% (${best.roi_per_day.toFixed(3)}%/day, ${best.annualized_roi.toFixed(0)}% annualized)`);
+            steps.push(`    Upside cap: $${best.strike} (+${best.distance_pct.toFixed(1)}% from spot)`);
+          }
+
+          return {
+            success: true,
+            result: `${filtered.length} calls pass filters, best: $${top10[0]?.strike ?? "N/A"}`,
+            scan: { total_calls: calls.length, filtered: filtered.length, top_calls: top10, spot, expiration: expDate, dte },
+            steps,
+            message: `Best call: $${top10[0]?.strike ?? "N/A"} strike, ${top10[0]?.delta.toFixed(2) ?? "N/A"} delta, ${top10[0]?.roi.toFixed(1) ?? "N/A"}% ROI`,
+          };
+        }
+
+        case "scan_spreads": {
+          const width = params.spread_width ?? 5;
+          steps.push(`=== CREDIT SPREAD SCANNER (width $${width}) ===`);
+          steps.push(``);
+
+          const putSpreads: Array<Record<string, any>> = [];
+          for (const p of puts) {
+            const shortStrike = p.strike;
+            const longStrike = shortStrike - width;
+            const longPut = puts.find((x: any) => x.strike === longStrike);
+            if (!longPut || shortStrike >= spot) continue;
+            const shortMid = ((p.bid ?? 0) + (p.ask ?? 0)) / 2;
+            const longMid = ((longPut.bid ?? 0) + (longPut.ask ?? 0)) / 2;
+            const netCredit = (shortMid - longMid) * shares;
+            const maxLoss = (width * shares) - netCredit;
+            const roi = maxLoss > 0 ? (netCredit / maxLoss) * 100 : 0;
+            const breakeven = shortStrike - (shortMid - longMid);
+            const volume = Math.min(p.volume ?? 0, longPut.volume ?? 0);
+            const oi = Math.min(p.openInterest ?? 0, longPut.openInterest ?? 0);
+            if (volume < minVol || oi < minOI) continue;
+            putSpreads.push({ type: "bull_put_spread", short_strike: shortStrike, long_strike: longStrike, net_credit: netCredit, max_loss: maxLoss, roi, breakeven, volume, open_interest: oi, delta: p.delta ?? 0, profit_prob: (1 - Math.abs(p.delta ?? 0)) * 100 });
+          }
+          putSpreads.sort((a, b) => b.roi - a.roi);
+          const topPutSpreads = putSpreads.slice(0, 5);
+
+          steps.push(`--- BULL PUT SPREADS (top 5 by ROI) ---`);
+          steps.push(`  Short   | Long    | Credit  | MaxLoss | ROI%   | Breakeven | Vol | OI  | Profit%`);
+          for (const s of topPutSpreads) {
+            steps.push(`  $${s.short_strike.toFixed(0).padEnd(6)} | $${s.long_strike.toFixed(0).padEnd(6)} | $${s.net_credit.toFixed(0).padEnd(7)} | $${s.max_loss.toFixed(0).padEnd(7)} | ${s.roi.toFixed(1).padEnd(6)} | $${s.breakeven.toFixed(2).padEnd(8)} | ${String(s.volume).padEnd(3)} | ${String(s.open_interest).padEnd(3)} | ${s.profit_prob.toFixed(0)}%`);
+          }
+
+          const callSpreads: Array<Record<string, any>> = [];
+          for (const c of calls) {
+            const shortStrike = c.strike;
+            const longStrike = shortStrike + width;
+            const longCall = calls.find((x: any) => x.strike === longStrike);
+            if (!longCall || shortStrike <= spot) continue;
+            const shortMid = ((c.bid ?? 0) + (c.ask ?? 0)) / 2;
+            const longMid = ((longCall.bid ?? 0) + (longCall.ask ?? 0)) / 2;
+            const netCredit = (shortMid - longMid) * shares;
+            const maxLoss = (width * shares) - netCredit;
+            const roi = maxLoss > 0 ? (netCredit / maxLoss) * 100 : 0;
+            const breakeven = shortStrike + (shortMid - longMid);
+            const volume = Math.min(c.volume ?? 0, longCall.volume ?? 0);
+            const oi = Math.min(c.openInterest ?? 0, longCall.openInterest ?? 0);
+            if (volume < minVol || oi < minOI) continue;
+            callSpreads.push({ type: "bear_call_spread", short_strike: shortStrike, long_strike: longStrike, net_credit: netCredit, max_loss: maxLoss, roi, breakeven, volume, open_interest: oi, delta: c.delta ?? 0, profit_prob: (1 - Math.abs(c.delta ?? 0)) * 100 });
+          }
+          callSpreads.sort((a, b) => b.roi - a.roi);
+          const topCallSpreads = callSpreads.slice(0, 5);
+
+          steps.push(``);
+          steps.push(`--- BEAR CALL SPREADS (top 5 by ROI) ---`);
+          steps.push(`  Short   | Long    | Credit  | MaxLoss | ROI%   | Breakeven | Vol | OI  | Profit%`);
+          for (const s of topCallSpreads) {
+            steps.push(`  $${s.short_strike.toFixed(0).padEnd(6)} | $${s.long_strike.toFixed(0).padEnd(6)} | $${s.net_credit.toFixed(0).padEnd(7)} | $${s.max_loss.toFixed(0).padEnd(7)} | ${s.roi.toFixed(1).padEnd(6)} | $${s.breakeven.toFixed(2).padEnd(8)} | ${String(s.volume).padEnd(3)} | ${String(s.open_interest).padEnd(3)} | ${s.profit_prob.toFixed(0)}%`);
+          }
+
+          return {
+            success: true,
+            result: `${putSpreads.length} put spreads, ${callSpreads.length} call spreads`,
+            scan: { bull_put_spreads: topPutSpreads, bear_call_spreads: topCallSpreads, spot, expiration: expDate, dte, width },
+            steps,
+            message: `Spread scanner: ${putSpreads.length} bull puts, ${callSpreads.length} bear calls (width $${width})`,
+          };
+        }
+
+        case "best_strike": {
+          const side = params.side;
+          let bestPut: Record<string, any> | null = null;
+          let bestCall: Record<string, any> | null = null;
+
+          if (side === "puts" || side === "both") {
+            const analyzedPuts = puts.map((p: any) => analyzeOption(p, "put")).filter((p: Record<string, any>) => p.passes_filter && p.otm);
+            analyzedPuts.sort((a: Record<string, any>, b: Record<string, any>) => b.overall_score - a.overall_score);
+            bestPut = analyzedPuts[0] ?? null;
+          }
+
+          if (side === "calls" || side === "both") {
+            const analyzedCalls = calls.map((c: any) => analyzeOption(c, "call")).filter((c: Record<string, any>) => c.passes_filter && c.otm);
+            analyzedCalls.sort((a: Record<string, any>, b: Record<string, any>) => b.overall_score - a.overall_score);
+            bestCall = analyzedCalls[0] ?? null;
+          }
+
+          steps.push(`=== BEST STRIKE RECOMMENDATION for ${symbol} ===`);
+          steps.push(`Spot: $${spot.toFixed(2)}, Expiration: ${expDate} (${dte}d)`);
+          steps.push(`Target delta: ${params.target_delta}`);
+          steps.push(``);
+
+          if (bestPut) {
+            steps.push(`  BEST PUT (cash-secured put):`);
+            steps.push(`    Strike: $${bestPut.strike} (${bestPut.distance_pct.toFixed(1)}% OTM)`);
+            steps.push(`    Premium: $${bestPut.mid.toFixed(2)} ($${(bestPut.mid * shares).toFixed(2)}/contract)`);
+            steps.push(`    Delta: ${bestPut.delta.toFixed(2)} → ${bestPut.profit_probability.toFixed(0)}% profit probability`);
+            steps.push(`    ROI: ${bestPut.roi.toFixed(2)}% (${bestPut.roi_per_day.toFixed(3)}%/day, ${bestPut.annualized_roi.toFixed(0)}% annualized)`);
+            steps.push(`    Collateral: $${bestPut.collateral.toFixed(2)}`);
+            steps.push(`    Liquidity: Vol ${bestPut.volume}, OI ${bestPut.open_interest}, Spread ${bestPut.spread_pct.toFixed(1)}%`);
+            steps.push(`    Breakeven: $${(bestPut.strike - bestPut.mid).toFixed(2)}`);
+          } else if (side === "puts" || side === "both") {
+            steps.push(`  No puts pass liquidity filters. Try lowering min_volume or min_open_interest.`);
+          }
+
+          steps.push(``);
+          if (bestCall) {
+            steps.push(`  BEST CALL (covered call):`);
+            steps.push(`    Strike: $${bestCall.strike} (+${bestCall.distance_pct.toFixed(1)}% OTM)`);
+            steps.push(`    Premium: $${bestCall.mid.toFixed(2)} ($${(bestCall.mid * shares).toFixed(2)}/contract)`);
+            steps.push(`    Delta: ${bestCall.delta.toFixed(2)} → ${bestCall.profit_probability.toFixed(0)}% profit probability`);
+            steps.push(`    ROI: ${bestCall.roi.toFixed(2)}% (${bestCall.roi_per_day.toFixed(3)}%/day, ${bestCall.annualized_roi.toFixed(0)}% annualized)`);
+            steps.push(`    Upside cap: $${bestCall.strike} (max profit if assigned)`);
+            steps.push(`    Liquidity: Vol ${bestCall.volume}, OI ${bestCall.open_interest}, Spread ${bestCall.spread_pct.toFixed(1)}%`);
+          } else if (side === "calls" || side === "both") {
+            steps.push(`  No calls pass liquidity filters. Try lowering min_volume or min_open_interest.`);
+          }
+
+          const best = bestPut && bestCall
+            ? (bestPut.overall_score >= bestCall.overall_score ? bestPut : bestCall)
+            : bestPut ?? bestCall;
+
+          return {
+            success: true,
+            result: best ? `Best: $${best.strike} ${best.type}` : "No valid strikes found",
+            scan: { best_put: bestPut, best_call: bestCall, spot, expiration: expDate, dte, target_delta: params.target_delta },
+            steps,
+            message: best ? `Best ${best.type}: $${best.strike} strike, ${best.delta.toFixed(2)} delta, ${best.roi.toFixed(1)}% ROI` : "No strikes pass filters",
+          };
+        }
+
+        default:
+          return { success: false, result: "", steps, message: "Unknown operation" };
+      }
+    } catch (e: any) {
+      return { success: false, result: "", steps, message: e.message ?? String(e) };
+    }
+  },
+};
