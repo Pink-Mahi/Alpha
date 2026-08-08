@@ -25,6 +25,7 @@ import { mathSolve, mathCalculate, physicsSolve, chemistrySolve, scienceConstant
 import { medicalSymptoms, medicalDrug, medicalAnatomy, medicalLab } from "./medicalTools.js";
 import { circuitAnalyze, magnetismSolve, semiconductorSolve, digitalLogic } from "./electronicsTools.js";
 import { financeCalculate, economicsIndicators } from "./financeTools.js";
+import { statsDescribe, statsHypothesisTest, statsRegression, statsDistribution } from "./statisticsTools.js";
 import type { ModelRouterClient } from "./modelRouterClient.js";
 
 import type { ToolDef, ToolContext } from "./toolBus.js";
@@ -468,4 +469,9 @@ export function registerBuiltinTools(bus: import("./toolBus.js").ToolBus, router
   // Finance & economics tools
   bus.register(financeCalculate);
   bus.register(economicsIndicators);
+  // Statistics & data analysis tools
+  bus.register(statsDescribe);
+  bus.register(statsHypothesisTest);
+  bus.register(statsRegression);
+  bus.register(statsDistribution);
 }
